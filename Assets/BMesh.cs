@@ -25,9 +25,9 @@ public class BMeshEditor : Editor
 public class BMesh : MonoBehaviour
 {
 
-    private List<Node> nodes = new List<Node>();
+    public List<Node> nodes = new List<Node>();
 
-    public enum ShowMode {Gizmo,Mesh}
+    public enum ShowMode {Gizmo,Mesh,Vertices}
 
     public ShowMode showMode;
 
@@ -57,28 +57,38 @@ public class BMesh : MonoBehaviour
 
         List<Vector3> vertices = new List<Vector3>();
         List<int> triangles = new List<int>();
-        int i = 0;
         foreach (Node n in nodes)
         {
-            foreach(Vector3 v in n.vpos)
+
+            n.vind = vertices.Count;
+
+            foreach (Vector3 v in n.vpos)
             {
                 vertices.Add(transform.InverseTransformVector(v));
             }
-            foreach(int t in n.GetTriangles())
+
+            if (n.isMultiple())
             {
-                //Debug.Log("A :"+(t + (8 * i)));
-                triangles.Add(t + (8 * i));
+                continue;
             }
-             
-            if (n.HasParent())
+
+
+            //faces of himself
+            foreach (int t in n.GetTriangles())
             {
+                //Debug.Log(n.gameObject.name);
+                triangles.Add(t + n.vind);
+            }
+            if (!n.isChildMultiple() && n.transform.childCount != 0)
+            {
+                Debug.Log(n.gameObject.name);
+                //faces from parents nodes vertices to himself
                 foreach (int t in n.GetTriangles())
                 {
-                    //Debug.Log("B:"+ ((t + (8 * i)) - 4));
-                    triangles.Add((t + (8 * i))-4);
+                    //Debug.Log((t + n.vind) + 4);
+                    triangles.Add((t + n.vind) + 4);
                 }
             }
-            i++;
 
         }
         Debug.Log("taille vertices : "+vertices.Count);
@@ -104,6 +114,9 @@ public class BMesh : MonoBehaviour
                 break;
             case ShowMode.Mesh:
                 GetComponent<MeshRenderer>().enabled = true;
+                break;
+            case ShowMode.Vertices:
+                GetComponent<MeshRenderer>().enabled = false;
                 break;
         }
 

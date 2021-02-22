@@ -15,9 +15,40 @@ public class Node : MonoBehaviour
 
     private BMesh bmesh;
 
-    public int ind = -1;
+    //vertex indice of the end of the last node
+    public int vind = 0;
 
     //------ Editor
+
+    public int GetChildInd(Node n)
+    {
+        int i = 0;
+        foreach(Transform t in transform)
+        {
+            Node nc = t.GetComponent<Node>();
+            if (nc != null)
+            {
+                if (nc == n)
+                    return i;
+                else
+                    i++;
+            }
+        }
+        return -1;
+    }
+
+    public bool isChildMultiple()
+    {
+        if (transform.childCount == 0)
+        {
+            return true;
+        }
+        Node n = transform.GetChild(0).GetComponent<Node>();
+        if (n == null)
+            return true;
+
+        return n.isMultiple();
+    }
 
     public bool HasParent()
     {
@@ -70,8 +101,24 @@ public class Node : MonoBehaviour
         {
             DrawSphere();
             DrawLines();
+        }else if (bmesh.showMode == BMesh.ShowMode.Vertices)
+        {
+            DrawVerts();
         }
         //DrawVerts();
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        if (Selection.activeTransform.gameObject != this.gameObject)
+        {
+            return;
+        }
+        Gizmos.color = new Color(1, 1, 0, 0.75F);
+        foreach (Vector3 v in vpos)
+        {
+            Gizmos.DrawSphere(v, 0.1f);
+        }
     }
 
     //------ Generation
