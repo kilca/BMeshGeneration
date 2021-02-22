@@ -20,23 +20,6 @@ public class Node : MonoBehaviour
 
     //------ Editor
 
-    public int GetChildInd(Node n)
-    {
-        int i = 0;
-        foreach(Transform t in transform)
-        {
-            Node nc = t.GetComponent<Node>();
-            if (nc != null)
-            {
-                if (nc == n)
-                    return i;
-                else
-                    i++;
-            }
-        }
-        return -1;
-    }
-
     public bool isChildMultiple()
     {
         if (transform.childCount == 0)
