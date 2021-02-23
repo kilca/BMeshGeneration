@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using GK;
+using Torec;
 
 [CustomEditor(typeof (BMesh))]
 public class BMeshEditor : Editor
@@ -12,12 +13,12 @@ public class BMeshEditor : Editor
         DrawDefaultInspector();
 
         BMesh bm = (BMesh)target;
-        /*
+        
         if (GUILayout.Button("Generate"))
         {
-           
+            bm.Generate();
         }
-        */
+        
     }
 }
 
@@ -33,13 +34,25 @@ public class BMesh : MonoBehaviour
 
     public ShowMode showMode;
 
+    public bool updateRealTime = false;
+
+    private List<Vector3> vertices;
+    List<int> triangles;
+
+    [Header("Best : 2,2")]
+
+    [Tooltip("does not applicate on updateRealTime")]
+    [Range(0,4)]
+    public int subdivideIter;
+
+    [Tooltip("does not applicate on updateRealTime")]
+    [Range(0, 4)]
+    public int smoothIter;
+
     [Header("References")]
 
     public Material normalMaterial;
     public Material wireframeMaterial;
-
-    private List<Vector3> vertices;
-    List<int> triangles;
 
     public void GenerateNodes()
     {
@@ -171,7 +184,6 @@ public class BMesh : MonoBehaviour
                 points.Add(vertices[i]);
             }
 
-            
             calc.GenerateHull(points, false, ref verts, ref tris, ref normals);
             /*
             List<int> pointsToVerts = new List<int>();
@@ -189,7 +201,7 @@ public class BMesh : MonoBehaviour
         }
     }
 
-    void Update()
+    public void Generate()
     {
         GenerateNodes();
         GenerateMesh();
@@ -197,10 +209,24 @@ public class BMesh : MonoBehaviour
 
         Mesh mesh = GetComponent<MeshFilter>().mesh;
         mesh.Clear();
-        mesh.vertices = vertices.ToArray();
-        mesh.triangles = triangles.ToArray();
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles.ToArray(),0);
+
+        //Catumull subdivision doesn't seem to work
+        if (!updateRealTime)
+        {
+            MeshHelper.Subdivide(mesh, subdivideIter);
+            MeshUtils.SmoothMesh(mesh, smoothIter);
+        }
+
         mesh.Optimize();
         mesh.RecalculateNormals();
+    }
+
+    void Update()
+    {
+        if (updateRealTime)
+            Generate();
 
         MeshRenderer meshR = GetComponent<MeshRenderer>();
         switch (showMode)
