@@ -137,6 +137,8 @@ public class BMesh : MonoBehaviour
             //We add previous and current vertices
             for(int i = n.vind - 4; i < n.vind + n.vpos.Count; i++)
             {
+                if (i < 0 || i > vertices.Count)
+                    continue;
                 vind.Add(i);
             }
 
@@ -152,8 +154,7 @@ public class BMesh : MonoBehaviour
                     }
                 }
             }
-
-            foreach(int i in vind)
+            foreach (int i in vind)
             {
                 points.Add(vertices[i]);
             }
