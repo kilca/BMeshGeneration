@@ -91,6 +91,28 @@ public class BMesh : MonoBehaviour
                 }
             }
 
+            if (n.transform.childCount == 0)//if top child
+            {
+                triangles.Add(n.vind + 5);
+                triangles.Add(n.vind + 6);
+                triangles.Add(n.vind + 7);
+                triangles.Add(n.vind + 5);
+                triangles.Add(n.vind + 7);
+                triangles.Add(n.vind + 4);
+            }
+
+            Node np = n.transform.parent.GetComponent<Node>();
+            if (np == null && !n.isMultiple())//if top parent
+            {
+                triangles.Add(n.vind + 1);
+                triangles.Add(n.vind + 0);
+                triangles.Add(n.vind + 3);
+                triangles.Add(n.vind + 1);
+                triangles.Add(n.vind + 3);
+                triangles.Add(n.vind + 2);
+            }
+
+
         }
 
 

@@ -165,17 +165,33 @@ public class Node : MonoBehaviour
         Vector3 v4 = Vector3.ProjectOnPlane(-top, diff) * size + transform.position;
 
         if (!isMultiple())
-        {
+        { 
             vpos.Add(v1);
             vpos.Add(v3);
             vpos.Add(v2);
             vpos.Add(v4);
+
         }
-        //4 2 3 1
-        vpos.Add(v1 + (diff * 0.5f));
-        vpos.Add(v3 + (diff * 0.5f));
-        vpos.Add(v2 + (diff * 0.5f));
-        vpos.Add(v4 + (diff * 0.5f));
+
+        //vertices between two nodes
+        if (childNodes.Count == 0)//if end node
+        {
+            v1 = Vector3.ProjectOnPlane(left, diff) * size * 0.5f + transform.position;
+            v2 = Vector3.ProjectOnPlane(-left, diff) * size * 0.5f + transform.position;
+            v3 = Vector3.ProjectOnPlane(top, diff) * size * 0.5f + transform.position;
+            v4 = Vector3.ProjectOnPlane(-top, diff) * size * 0.5f + transform.position;
+
+            vpos.Add(v1 + (diff * 0.2f));
+            vpos.Add(v3 + (diff * 0.2f));
+            vpos.Add(v2 + (diff * 0.2f));
+            vpos.Add(v4 + (diff * 0.2f));
+        }else
+        {
+            vpos.Add(v1 + (diff * 0.5f));
+            vpos.Add(v3 + (diff * 0.5f));
+            vpos.Add(v2 + (diff * 0.5f));
+            vpos.Add(v4 + (diff * 0.5f));
+        }
 
 
     }
