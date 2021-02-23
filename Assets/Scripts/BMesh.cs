@@ -12,11 +12,12 @@ public class BMeshEditor : Editor
         DrawDefaultInspector();
 
         BMesh bm = (BMesh)target;
-
+        /*
         if (GUILayout.Button("Generate"))
         {
            
         }
+        */
     }
 }
 
@@ -26,11 +27,16 @@ public class BMeshEditor : Editor
 public class BMesh : MonoBehaviour
 {
 
-    public List<Node> nodes = new List<Node>();
+    private List<Node> nodes = new List<Node>();
 
-    public enum ShowMode {Gizmo,Mesh,Vertices}
+    public enum ShowMode {Gizmo,Mesh,Vertices,Wireframe}
 
     public ShowMode showMode;
+
+    [Header("References")]
+
+    public Material normalMaterial;
+    public Material wireframeMaterial;
 
     private List<Vector3> vertices;
     List<int> triangles;
@@ -118,19 +124,24 @@ public class BMesh : MonoBehaviour
 
     }
 
+
     void GenerateMultipleMesh()
     {
         //indice of vertices near multiple
-        List<int> vind = new List<int>();
-        List<Vector3> points = new List<Vector3>();
-
-        var verts = new List<Vector3>();
-        var tris = new List<int>();
-        var normals = new List<Vector3>();
 
         foreach (Node n in nodes)
         {
+            List<int> vind = new List<int>();
+            List<Vector3> points = new List<Vector3>();
+
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+            var normals = new List<Vector3>();
+
             var calc = new ConvexHullCalculator();
+
+            Dictionary<Vector3, int> map = new Dictionary<Vector3, int>(); 
+
             if (!n.isMultiple())
                 continue;
 
@@ -156,21 +167,23 @@ public class BMesh : MonoBehaviour
             }
             foreach (int i in vind)
             {
+                map.Add(vertices[i], i);
                 points.Add(vertices[i]);
             }
 
             
             calc.GenerateHull(points, false, ref verts, ref tris, ref normals);
-
+            /*
             List<int> pointsToVerts = new List<int>();
             foreach (Vector3 v in verts)
             {
                 pointsToVerts.Add(vertices.IndexOf(v));
             }
-
+            */
             foreach (int i in tris)
             {
-                triangles.Add(pointsToVerts[i]);
+                triangles.Add(map[verts[i]]);
+                //triangles.Add(pointsToVerts[i]);
             }
             
         }
@@ -189,17 +202,22 @@ public class BMesh : MonoBehaviour
         mesh.Optimize();
         mesh.RecalculateNormals();
 
-
+        MeshRenderer meshR = GetComponent<MeshRenderer>();
         switch (showMode)
         {
             case ShowMode.Gizmo:
-                GetComponent<MeshRenderer>().enabled = false;
+                meshR.enabled = false;
                 break;
             case ShowMode.Mesh:
-                GetComponent<MeshRenderer>().enabled = true;
+                meshR.enabled = true;
+                meshR.material = normalMaterial;
                 break;
             case ShowMode.Vertices:
-                GetComponent<MeshRenderer>().enabled = false;
+                meshR.enabled = false;
+                break;
+            case ShowMode.Wireframe:
+                meshR.enabled = true;
+                meshR.material = wireframeMaterial;
                 break;
         }
 

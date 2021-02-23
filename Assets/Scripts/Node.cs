@@ -80,7 +80,7 @@ public class Node : MonoBehaviour
 
     void OnDrawGizmos()
     {
-        if (bmesh.showMode == BMesh.ShowMode.Gizmo)
+        if (bmesh.showMode == BMesh.ShowMode.Gizmo || bmesh.showMode == BMesh.ShowMode.Wireframe)
         {
             DrawSphere();
             DrawLines();
