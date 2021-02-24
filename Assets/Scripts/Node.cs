@@ -20,6 +20,16 @@ public class Node : MonoBehaviour
 
     //------ Editor
 
+    public int GetChildIndice(Transform t)
+    {
+        for(int i = 0; i < transform.childCount; i++)
+        {
+            if (transform.GetChild(i) == t)
+                return i;
+        }
+        return -1;
+    }
+
     public bool isChildMultiple()
     {
         if (transform.childCount == 0)
@@ -97,11 +107,12 @@ public class Node : MonoBehaviour
         {
             return;
         }
-        Gizmos.color = new Color(1, 1, 0, 0.75F);
+        DrawVerts();
+        /*Gizmos.color = new Color(1, 1, 0, 0.75F);
         foreach (Vector3 v in vpos)
         {
             Gizmos.DrawSphere(v, 0.1f);
-        }
+        }*/
     }
 
     //------ Generation

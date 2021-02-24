@@ -39,13 +39,11 @@ public class BMesh : MonoBehaviour
     private List<Vector3> vertices;
     List<int> triangles;
 
-    [Header("Best : 2,2")]
+    [Header("Best : 2,2 / Subd does not app on realTime")]
 
-    [Tooltip("does not applicate on updateRealTime")]
     [Range(0,4)]
     public int subdivideIter;
 
-    [Tooltip("does not applicate on updateRealTime")]
     [Range(0, 4)]
     public int smoothIter;
 
@@ -73,6 +71,20 @@ public class BMesh : MonoBehaviour
             triangles[i] = temp;
         }
     }
+    /*
+    void OnDrawGizmos()
+    {
+
+        Gizmos.color = Color.green;
+        int i = 0;
+        foreach (Vector3 v in vertices)
+        {
+            Handles.Label(v, ""+i);
+            i++;
+            //Gizmos.DrawWireSphere(v, 0.5f);
+        }
+    }
+    */
 
     void GenerateMesh()
     {
@@ -137,13 +149,15 @@ public class BMesh : MonoBehaviour
 
     }
 
-
     void GenerateMultipleMesh()
     {
         //indice of vertices near multiple
 
         foreach (Node n in nodes)
         {
+            if (!n.isMultiple())
+                continue;
+
             List<int> vind = new List<int>();
             List<Vector3> points = new List<Vector3>();
 
@@ -153,31 +167,68 @@ public class BMesh : MonoBehaviour
 
             var calc = new ConvexHullCalculator();
 
-            Dictionary<Vector3, int> map = new Dictionary<Vector3, int>(); 
+            Dictionary<Vector3, int> map = new Dictionary<Vector3, int>();
 
-            if (!n.isMultiple())
-                continue;
+            int subCount = 0;
+            foreach (Transform t in n.transform)//for each child
+            {
+                Node nc = t.GetComponent<Node>();
+                if (nc != null)
+                {
+                    var points2 = new List<Vector3>();
+                    var verts2 = new List<Vector3>();
+                    var tris2 = new List<int>();
+                    var norm2 = new List<Vector3>();
+                    Dictionary<Vector3, int> map2 = new Dictionary<Vector3, int>();
+                    for (int j = 0; j < 4; j++)
+                    {
+                        int val1 = n.vind + j + 4 * subCount;
+                        int val2 = nc.vind + j;
+                        points2.Add(vertices[val1]);//add current vertices
+                        map2.Add(vertices[val1], val1);
+
+                        points2.Add(vertices[val2]);//add next vertices
+                        map2.Add(vertices[val2], val2);
+                    }
+
+                    var calc2 = new ConvexHullCalculator();
+                    calc2.GenerateHull(points2, false, ref verts2, ref tris2, ref norm2);
+                    foreach (int j in tris2)
+                    {
+                        //Debug.Log(j);
+                        triangles.Add(map2[verts2[j]]);
+                    }
+                    subCount++;
+                }
+            }
+
+            //We add vertices of parent
+            if (n.HasParent())
+            {
+                Node np = n.transform.parent.GetComponent<Node>();
+                int ind = np.GetChildIndice(n.transform);
+                //Debug.Log(ind);
+                if (np.isMultiple())
+                {
+                    for (int j = 0; j < 4; j++)
+                        vind.Add(np.vind + j + 4 * ind);
+                }
+                else
+                {
+                    //Debug.Log("is multiple");
+                    for (int j = 0; j < 4; j++)
+                        vind.Add(np.vind + j + 4);
+                }
+            }
 
             //We add previous and current vertices
-            for(int i = n.vind - 4; i < n.vind + n.vpos.Count; i++)
+            for (int i = n.vind; i < n.vind + n.vpos.Count; i++)
             {
                 if (i < 0 || i > vertices.Count)
                     continue;
                 vind.Add(i);
             }
-
-            //we add firsts child vertices
-            foreach (Transform t in n.transform)
-            {
-                Node nc = t.GetComponent<Node>();
-                if (nc != null)
-                {
-                    for(int i = nc.vind; i < nc.vind + 4; i++)
-                    {
-                        vind.Add(i);
-                    }
-                }
-            }
+            //???Can be one for
             foreach (int i in vind)
             {
                 map.Add(vertices[i], i);
