@@ -185,10 +185,12 @@ public class BMesh : MonoBehaviour
                         int val1 = n.vind + j + 4 * subCount;
                         int val2 = nc.vind + j;
                         points2.Add(vertices[val1]);//add current vertices
-                        map2.Add(vertices[val1], val1);
+                        //if (!map2.ContainsKey(vertices[val1]))
+                            map2.Add(vertices[val1], val1);
 
                         points2.Add(vertices[val2]);//add next vertices
-                        map2.Add(vertices[val2], val2);
+                        //if (!map2.ContainsKey(vertices[val2]))
+                            map2.Add(vertices[val2], val2);
                     }
 
                     var calc2 = new ConvexHullCalculator();
@@ -196,7 +198,8 @@ public class BMesh : MonoBehaviour
                     foreach (int j in tris2)
                     {
                         //Debug.Log(j);
-                        triangles.Add(map2[verts2[j]]);
+                        //if (!map2.ContainsKey(verts2[j]))
+                            triangles.Add(map2[verts2[j]]);
                     }
                     subCount++;
                 }
