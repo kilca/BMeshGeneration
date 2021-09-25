@@ -261,7 +261,7 @@ public class BMesh : MonoBehaviour
         GenerateMesh();
         GenerateMultipleMesh();
 
-        Mesh mesh = GetComponent<MeshFilter>().mesh;
+        Mesh mesh = GetComponent<MeshFilter>().sharedMesh;
         mesh.Clear();
         mesh.SetVertices(vertices);
         mesh.SetTriangles(triangles.ToArray(),0);
