@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using PGizmos = Popcron.Gizmos;
 
 [ExecuteInEditMode]
 public class Node : MonoBehaviour
@@ -61,8 +62,19 @@ public class Node : MonoBehaviour
             Gizmos.color = Color.yellow;
         else//si > 1
             Gizmos.color = Color.red;
-
         Gizmos.DrawSphere(this.transform.position, size);
+    }
+
+    void PDrawSphere()
+    {
+        Color c;
+        if (childNodes.Count == 1)
+            c = Color.blue;
+        else if (childNodes.Count == 0)
+            c = Color.yellow;
+        else//si > 1
+            c = Color.red;
+        PGizmos.Sphere(this.transform.position, size, c);
     }
 
     void DrawVerts()
@@ -73,7 +85,6 @@ public class Node : MonoBehaviour
         {
             Handles.Label(v, ""+i);
             i++;
-            //Gizmos.DrawWireSphere(v, 0.5f);
         }
     }
 
@@ -88,6 +99,16 @@ public class Node : MonoBehaviour
         }
     }
 
+    void PDrawLines()
+    {
+        foreach (Transform t in transform)
+        {
+            if (t.GetComponent<Node>() == null)
+                continue;
+            PGizmos.Line(transform.position, t.position, Color.white);
+        }
+    }
+
     void OnDrawGizmos()
     {
         if (bmesh.showMode == BMesh.ShowMode.Gizmo || bmesh.showMode == BMesh.ShowMode.Wireframe)
@@ -98,7 +119,6 @@ public class Node : MonoBehaviour
         {
             DrawVerts();
         }
-        //DrawVerts();
     }
 
     void OnDrawGizmosSelected()
@@ -108,11 +128,19 @@ public class Node : MonoBehaviour
             return;
         }
         DrawVerts();
-        /*Gizmos.color = new Color(1, 1, 0, 0.75F);
-        foreach (Vector3 v in vpos)
-        {
-            Gizmos.DrawSphere(v, 0.1f);
-        }*/
+    }
+
+    private void OnRenderObject()
+    {
+        PGizmos.Material = null;
+        if (!ApplicationSettings.IsUnityEditor){ // A décommenter
+            if (bmesh.showMode == BMesh.ShowMode.Gizmo || bmesh.showMode == BMesh.ShowMode.Wireframe)
+            {
+                PGizmos.Enabled = true;
+                PDrawSphere();
+                PDrawLines();
+            }
+        }
     }
 
     //------ Generation
