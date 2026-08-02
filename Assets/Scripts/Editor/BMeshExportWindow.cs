@@ -1,9 +1,6 @@
 // ============================================================================
 // Editor Window for Export
 // ============================================================================
-// ============================================================================
-// Editor Window for Export
-// ============================================================================
 #if UNITY_EDITOR
 using System.IO;
 using UnityEditor;
@@ -16,6 +13,9 @@ public class BMeshExportWindow : EditorWindow
     private string fileName = "ExportedMesh";
     private int exportFormat = 0;
     private string[] formatOptions = { "OBJ (Geometry Only)", "COLLADA/DAE (With Bones)", "JSON (With Bones)", "Binary (With Bones)" };
+
+    private GameObject nodePrefab;
+    private string creatureFileName = "ExportedCreature";
 
     [MenuItem("Tools/BMesh Exporter")]
     public static void ShowWindow()
@@ -85,6 +85,29 @@ public class BMeshExportWindow : EditorWindow
         {
             EditorGUILayout.HelpBox("Please assign a BMesh object to export.", MessageType.Warning);
         }
+
+        EditorGUILayout.Space();
+        GUILayout.Label("Creature Skeleton (Node hierarchy)", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox("Exports/imports the Node hierarchy itself (name, position, size) as JSON, so a generated creature can be saved and reloaded as editable nodes -- independent of the mesh/bones export above.", MessageType.Info);
+
+        creatureFileName = EditorGUILayout.TextField("Creature File Name", creatureFileName);
+        nodePrefab = (GameObject)EditorGUILayout.ObjectField("Node Prefab (for import)", nodePrefab, typeof(GameObject), false);
+
+        EditorGUI.BeginDisabledGroup(targetBMesh == null);
+
+        if (GUILayout.Button("Export Creature Skeleton", GUILayout.Height(30)))
+        {
+            ExportCreature();
+        }
+
+        EditorGUI.BeginDisabledGroup(nodePrefab == null);
+        if (GUILayout.Button("Import Creature Skeleton", GUILayout.Height(30)))
+        {
+            ImportCreature();
+        }
+        EditorGUI.EndDisabledGroup();
+
+        EditorGUI.EndDisabledGroup();
     }
 
     private void GenerateBones()
@@ -124,6 +147,28 @@ public class BMeshExportWindow : EditorWindow
 
         AssetDatabase.Refresh();
         EditorUtility.DisplayDialog("Success", $"Mesh exported to: {Path.Combine(exportPath, fileName + extension)}", "OK");
+    }
+
+    private void ExportCreature()
+    {
+        if (targetBMesh == null) return;
+
+        string filePath = Path.Combine(exportPath, creatureFileName + ".json");
+        CreatureIO.ExportToFile(targetBMesh.gameObject, creatureFileName, filePath);
+
+        AssetDatabase.Refresh();
+        EditorUtility.DisplayDialog("Success", $"Creature skeleton exported to: {filePath}", "OK");
+    }
+
+    private void ImportCreature()
+    {
+        if (targetBMesh == null || nodePrefab == null) return;
+
+        string filePath = EditorUtility.OpenFilePanel("Select Creature Skeleton", exportPath, "json");
+        if (string.IsNullOrEmpty(filePath)) return;
+
+        CreatureIO.ImportFromFile(filePath, targetBMesh.transform, nodePrefab);
+        EditorUtility.DisplayDialog("Success", "Creature skeleton imported. Click \"Generate\" on the BMesh to rebuild the mesh.", "OK");
     }
 }
 #endif

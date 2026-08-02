@@ -21,7 +21,7 @@ public static class MeshHelper
         colors = new List<Color>(mesh.colors);
         uv = new List<Vector2>(mesh.uv);
         uv1 = new List<Vector2>(mesh.uv2);
-        uv2 = new List<Vector2>(mesh.uv2);
+        uv2 = new List<Vector2>(mesh.uv3);
         indices = new List<int>();
     }
     static void CleanUp()
@@ -99,7 +99,7 @@ public static class MeshHelper
         if (uv1.Count > 0)
             mesh.uv2 = uv1.ToArray();
         if (uv2.Count > 0)
-            mesh.uv2 = uv2.ToArray();
+            mesh.uv3 = uv2.ToArray();
 
         mesh.triangles = indices.ToArray();
 
@@ -184,7 +184,7 @@ public static class MeshHelper
         if (uv1.Count > 0)
             mesh.uv2 = uv1.ToArray();
         if (uv2.Count > 0)
-            mesh.uv2 = uv2.ToArray();
+            mesh.uv3 = uv2.ToArray();
 
         mesh.triangles = indices.ToArray();
 

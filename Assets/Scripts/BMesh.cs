@@ -1,26 +1,8 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEditor;
 using GK;
 using Torec;
-
-[CustomEditor(typeof (BMesh))]
-public class BMeshEditor : Editor
-{
-    public override void OnInspectorGUI()
-    {
-        DrawDefaultInspector();
-
-        BMesh bm = (BMesh)target;
-        
-        if (GUILayout.Button("Generate"))
-        {
-            bm.Generate();
-        }
-        
-    }
-}
 
 [ExecuteInEditMode]
 [RequireComponent(typeof(MeshFilter))]
@@ -58,7 +40,7 @@ public class BMesh : MonoBehaviour
         foreach (Node n in nodes)
         {
             n.UpdateChilds();
-            n.Generer();
+            n.Generate();
         }
     }
 
@@ -71,12 +53,18 @@ public class BMesh : MonoBehaviour
         vertices = meshData.vertices;
         triangles = meshData.triangles;
 
-        Mesh mesh = GetComponent<MeshFilter>().sharedMesh;
+        MeshFilter meshFilter = GetComponent<MeshFilter>();
+        if (meshFilter.sharedMesh == null)
+        {
+            meshFilter.sharedMesh = new Mesh();
+        }
+        Mesh mesh = meshFilter.sharedMesh;
         mesh.Clear();
         mesh.SetVertices(vertices);
         mesh.SetTriangles(triangles.ToArray(), 0);
+        BakeRestPositionUVs(mesh, vertices);
 
-        // Catumull subdivision doesn't seem to work
+        // Catmull-Clark subdivision doesn't seem to work
         if (!updateRealTime)
         {
             MeshHelper.Subdivide(mesh, subdivideIter);
@@ -85,6 +73,29 @@ public class BMesh : MonoBehaviour
 
         mesh.Optimize();
         mesh.RecalculateNormals();
+    }
+
+    // Bakes each vertex's own (pre-subdivision, pre-skinning) local position
+    // into spare UV channels, split across two Vector2 channels since the
+    // legacy uv2/uv3 accessors used here (and by MeshHelper.Subdivide, which
+    // already knows to interpolate them alongside the real vertices when the
+    // mesh is subdivided) only carry 2 components each. Skinning
+    // (BMeshBoneExtensions.CreateSkeleton) only touches vertex
+    // positions/bone weights, never UVs, so this rest-pose position survives
+    // untouched into the animated skinned mesh -- letting
+    // Custom/TriplanarCreature sample from a position that doesn't slide
+    // around as the creature animates, instead of the live (moving) worldPos.
+    private static void BakeRestPositionUVs(Mesh mesh, List<Vector3> verts)
+    {
+        Vector2[] uv2 = new Vector2[verts.Count];
+        Vector2[] uv3 = new Vector2[verts.Count];
+        for (int i = 0; i < verts.Count; i++)
+        {
+            uv2[i] = new Vector2(verts[i].x, verts[i].y);
+            uv3[i] = new Vector2(verts[i].z, 0f);
+        }
+        mesh.uv2 = uv2;
+        mesh.uv3 = uv3;
     }
 
     void Update()

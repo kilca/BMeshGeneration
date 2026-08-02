@@ -1,27 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEditor;
-[CustomEditor(typeof(ProcGen))]
-public class ProcGenEditor : Editor
-{
-    public override void OnInspectorGUI()
-    {
-        DrawDefaultInspector();
 
-        ProcGen bm = (ProcGen)target;
-
-        if (GUILayout.Button("Generate"))
-        {
-            bm.Generate();
-        }
-        if (GUILayout.Button("Clear"))
-        {
-            bm.Clear();
-        }
-
-    }
-}
 public class ProcGen : MonoBehaviour
 {
     public enum GenType { Biped,Creature};
@@ -151,7 +131,7 @@ public class ProcGen : MonoBehaviour
         SetSize(headFront, 0.3f, 0.8f);
 
         GameObject headBack = Instantiate(nodePrefab, head.transform);
-        headBack.name = "headFront";
+        headBack.name = "headBack";
         headBack.transform.localPosition = new Vector3(-1.0f, 0.0f, 0f);
         SetSize(headBack, 0.3f, 0.8f);
     }

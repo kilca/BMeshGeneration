@@ -1,46 +1,19 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class MeshUtils
 {
-
-    private static Mesh CloneMesh(Mesh mesh)
-    {
-        Mesh clone = new Mesh();
-        clone.vertices = mesh.vertices;
-        clone.normals = mesh.normals;
-        clone.tangents = mesh.tangents;
-        clone.triangles = mesh.triangles;
-        clone.uv = mesh.uv;
-        clone.uv2 = mesh.uv2;
-        clone.bindposes = mesh.bindposes;
-        clone.boneWeights = mesh.boneWeights;
-        clone.bounds = mesh.bounds;
-        clone.colors = mesh.colors;
-        clone.name = mesh.name;
-        //TODO : Are we missing anything?
-        return clone;
-    }
-
     public static void SmoothMesh(Mesh m, int iter)
     {
-        // Clone the cloth mesh to work on
-        // Get the sourceMesh from the originalSkinnedMesh
-        // Clone the sourceMesh 
-        // Reference workingMesh to see deformations
-
-
-        // Apply Laplacian Smoothing Filter to Mesh
         for (int i = 0; i < iter; i++)
-            //workingMesh.vertices = SmoothFilter.laplacianFilter(workingMesh.vertices, workingMesh.triangles);
-            m.vertices = hcFilter(m.vertices, m.vertices, m.triangles, 0.0f, 0.5f);
+            m.vertices = HcFilter(m.vertices, m.vertices, m.triangles, 0.0f, 0.5f);
     }
 
-    public static Vector3[] laplacianFilter(Vector3[] sv, int[] t)
+    public static Vector3[] LaplacianFilter(Vector3[] sv, int[] t)
     {
         Vector3[] wv = new Vector3[sv.Length];
-        List<Vector3> adjacentVertices = new List<Vector3>();
+        List<Vector3> adjacentVertices;
 
         float dx = 0.0f;
         float dy = 0.0f;
@@ -49,7 +22,7 @@ public class MeshUtils
         for (int vi = 0; vi < sv.Length; vi++)
         {
             // Find the sv neighboring vertices
-            adjacentVertices = MeshUtils.findAdjacentNeighbors(sv, t, sv[vi]);
+            adjacentVertices = FindAdjacentNeighbors(sv, t, sv[vi]);
 
             if (adjacentVertices.Count != 0)
             {
@@ -57,7 +30,6 @@ public class MeshUtils
                 dy = 0.0f;
                 dz = 0.0f;
 
-                //Debug.Log("Vertex Index Length = "+vertexIndexes.Length);
                 // Add the vertices and divide by the number of vertices
                 for (int j = 0; j < adjacentVertices.Count; j++)
                 {
@@ -75,15 +47,13 @@ public class MeshUtils
         return wv;
     }
 
-    public static Vector3[] hcFilter(Vector3[] sv, Vector3[] pv, int[] t, float alpha, float beta)
+    public static Vector3[] HcFilter(Vector3[] sv, Vector3[] pv, int[] t, float alpha, float beta)
     {
         Vector3[] wv = new Vector3[sv.Length];
         Vector3[] bv = new Vector3[sv.Length];
 
-
-
         // Perform Laplacian Smooth
-        wv = laplacianFilter(sv, t);
+        wv = LaplacianFilter(sv, t);
 
         // Compute Differences
         for (int i = 0; i < wv.Length; i++)
@@ -104,7 +74,7 @@ public class MeshUtils
             adjacentIndexes.Clear();
 
             // Find the bv neighboring vertices
-            adjacentIndexes = MeshUtils.findAdjacentNeighborIndexes(sv, t, sv[j]);
+            adjacentIndexes = FindAdjacentNeighborIndexes(sv, t, sv[j]);
 
             dx = 0.0f;
             dy = 0.0f;
@@ -127,7 +97,7 @@ public class MeshUtils
     }
 
 
-    public static List<Vector3> findAdjacentNeighbors(Vector3[] v, int[] t, Vector3 vertex)
+    public static List<Vector3> FindAdjacentNeighbors(Vector3[] v, int[] t, Vector3 vertex)
     {
         List<Vector3> adjacentV = new List<Vector3>();
         List<int> facemarker = new List<int>();
@@ -179,23 +149,19 @@ public class MeshUtils
                             facemarker.Add(k);
 
                             // Add non duplicate vertices to the list
-                            if (isVertexExist(adjacentV, v[v1]) == false)
+                            if (IsVertexExist(adjacentV, v[v1]) == false)
                             {
                                 adjacentV.Add(v[v1]);
-                                //Debug.Log("Adjacent vertex index = " + v1);
                             }
 
-                            if (isVertexExist(adjacentV, v[v2]) == false)
+                            if (IsVertexExist(adjacentV, v[v2]) == false)
                             {
                                 adjacentV.Add(v[v2]);
-                                //Debug.Log("Adjacent vertex index = " + v2);
                             }
                             marker = false;
                         }
                     }
             }
-
-        //Debug.Log("Faces Found = " + facecount);
 
         return adjacentV;
     }
@@ -204,7 +170,7 @@ public class MeshUtils
     // Finds a set of adjacent vertices indexes for a given vertex
     // Note the success of this routine expects only the set of neighboring faces to eacn contain one vertex corresponding
     // to the vertex in question
-    public static List<int> findAdjacentNeighborIndexes(Vector3[] v, int[] t, Vector3 vertex)
+    public static List<int> FindAdjacentNeighborIndexes(Vector3[] v, int[] t, Vector3 vertex)
     {
         List<int> adjacentIndexes = new List<int>();
         List<Vector3> adjacentV = new List<Vector3>();
@@ -257,31 +223,27 @@ public class MeshUtils
                             facemarker.Add(k);
 
                             // Add non duplicate vertices to the list
-                            if (isVertexExist(adjacentV, v[v1]) == false)
+                            if (IsVertexExist(adjacentV, v[v1]) == false)
                             {
                                 adjacentV.Add(v[v1]);
                                 adjacentIndexes.Add(v1);
-                                //Debug.Log("Adjacent vertex index = " + v1);
                             }
 
-                            if (isVertexExist(adjacentV, v[v2]) == false)
+                            if (IsVertexExist(adjacentV, v[v2]) == false)
                             {
                                 adjacentV.Add(v[v2]);
                                 adjacentIndexes.Add(v2);
-                                //Debug.Log("Adjacent vertex index = " + v2);
                             }
                             marker = false;
                         }
                     }
             }
 
-        //Debug.Log("Faces Found = " + facecount);
-
         return adjacentIndexes;
     }
 
     // Does the vertex v exist in the list of vertices
-    static bool isVertexExist(List<Vector3> adjacentV, Vector3 v)
+    static bool IsVertexExist(List<Vector3> adjacentV, Vector3 v)
     {
         bool marker = false;
         foreach (Vector3 vec in adjacentV)

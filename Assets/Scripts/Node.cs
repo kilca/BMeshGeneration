@@ -1,6 +1,8 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+#if UNITY_EDITOR
 using UnityEditor;
+#endif
 using UnityEngine;
 
 [ExecuteInEditMode]
@@ -59,7 +61,7 @@ public class Node : MonoBehaviour
             Gizmos.color = Color.blue;
         else if (childNodes.Count == 0)
             Gizmos.color = Color.yellow;
-        else//si > 1
+        else // more than one child
             Gizmos.color = Color.red;
 
         Gizmos.DrawSphere(this.transform.position, size);
@@ -71,9 +73,10 @@ public class Node : MonoBehaviour
         int i = 0;
         foreach (Vector3 v in vpos)
         {
-            Handles.Label(v, ""+i);
+#if UNITY_EDITOR
+            Handles.Label(v, "" + i);
+#endif
             i++;
-            //Gizmos.DrawWireSphere(v, 0.5f);
         }
     }
 
@@ -98,21 +101,17 @@ public class Node : MonoBehaviour
         {
             DrawVerts();
         }
-        //DrawVerts();
     }
 
     void OnDrawGizmosSelected()
     {
+#if UNITY_EDITOR
         if (Selection.activeTransform.gameObject != this.gameObject)
         {
             return;
         }
+#endif
         DrawVerts();
-        /*Gizmos.color = new Color(1, 1, 0, 0.75F);
-        foreach (Vector3 v in vpos)
-        {
-            Gizmos.DrawSphere(v, 0.1f);
-        }*/
     }
 
     //------ Generation
@@ -126,10 +125,6 @@ public class Node : MonoBehaviour
     public int[] GetTriangles()
     {
         int[] triangles = {
-            /*
-            0, 2, 1, //face front
-			0, 3, 2,
-            */
             3, 7, 6, //face top
 			3, 6, 2,
 
@@ -138,10 +133,7 @@ public class Node : MonoBehaviour
 
             0, 4, 7, //face left
 			0, 7, 3,
-            /*
-            5, 4, 7, //face back
-			5, 7, 6,
-            */
+
             1, 5, 4, //face bottom
 			1, 4, 0
         };
@@ -207,7 +199,7 @@ public class Node : MonoBehaviour
 
     }
 
-    public void Generer()
+    public void Generate()
     {
         vpos = new List<Vector3>();
         if (childNodes.Count > 0)

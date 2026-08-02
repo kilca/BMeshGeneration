@@ -74,7 +74,7 @@ public static class MeshExporter
         return exportData;
     }
 
-    private static BoneWeight[] GenerateBoneWeights(Vector3[] vertices, List<BoneData> bones)
+    public static BoneWeight[] GenerateBoneWeights(Vector3[] vertices, List<BoneData> bones)
     {
         BoneWeight[] weights = new BoneWeight[vertices.Length];
 

@@ -4,7 +4,7 @@ using UnityEngine;
 
 public static class BMeshGenerator
 {
-        private const int VERTICES_PER_NODE = 4;
+    private const int VERTICES_PER_NODE = 4;
     private const int BASE_VERTEX_OFFSET = 4;
 
     public struct MeshData
@@ -63,6 +63,7 @@ public static class BMeshGenerator
 
             if (n.transform.childCount == 0) // If top child
             {
+                // Bottom cap face, closing off the "between nodes" vertex ring (vind+4..+7)
                 triangles.Add(n.vind + 5);
                 triangles.Add(n.vind + 6);
                 triangles.Add(n.vind + 7);
@@ -74,6 +75,7 @@ public static class BMeshGenerator
             Node np = n.transform.parent.GetComponent<Node>();
             if (np == null && !n.isMultiple()) // If top parent
             {
+                // Top cap face, closing off the "self" vertex ring (vind+0..+3)
                 triangles.Add(n.vind + 1);
                 triangles.Add(n.vind + 0);
                 triangles.Add(n.vind + 3);
@@ -119,17 +121,28 @@ public static class BMeshGenerator
                         int val1 = n.vind + j + VERTICES_PER_NODE * subCount;
                         int val2 = nc.vind + j;
                         points2.Add(vertices[val1]); // Add current vertices
-                        map2.Add(vertices[val1], val1);
+                        map2[vertices[val1]] = val1; // indexer, not Add: two indices can coincide at the same position (e.g. right after a node was interactively added/edited), which would otherwise throw
 
                         points2.Add(vertices[val2]); // Add next vertices
-                        map2.Add(vertices[val2], val2);
+                        map2[vertices[val2]] = val2;
                     }
 
-                    var calc2 = new ConvexHullCalculator();
-                    calc2.GenerateHull(points2, false, ref verts2, ref tris2, ref norm2);
-                    foreach (int j in tris2)
+                    // Degenerate point sets (e.g. coplanar -- can happen right after
+                    // interactively adding/moving a node into a flat arrangement)
+                    // make the hull calculator throw. Skip just this junction's
+                    // triangles rather than crashing the whole mesh generation.
+                    try
                     {
-                        triangles.Add(map2[verts2[j]]);
+                        var calc2 = new ConvexHullCalculator();
+                        calc2.GenerateHull(points2, false, ref verts2, ref tris2, ref norm2);
+                        foreach (int j in tris2)
+                        {
+                            triangles.Add(map2[verts2[j]]);
+                        }
+                    }
+                    catch (System.ArgumentException e)
+                    {
+                        Debug.LogWarning($"BMeshGenerator: skipped a degenerate junction hull ({e.Message})");
                     }
                     subCount++;
                 }
@@ -163,15 +176,21 @@ public static class BMeshGenerator
 
             foreach (int i in vind)
             {
-                map.Add(vertices[i], i);
+                map[vertices[i]] = i; // indexer, not Add: see the map2 comment above
                 points.Add(vertices[i]);
             }
 
-            calc.GenerateHull(points, false, ref verts, ref tris, ref normals);
-
-            foreach (int i in tris)
+            try
             {
-                triangles.Add(map[verts[i]]);
+                calc.GenerateHull(points, false, ref verts, ref tris, ref normals);
+                foreach (int i in tris)
+                {
+                    triangles.Add(map[verts[i]]);
+                }
+            }
+            catch (System.ArgumentException e)
+            {
+                Debug.LogWarning($"BMeshGenerator: skipped a degenerate junction hull ({e.Message})");
             }
         }
     }
