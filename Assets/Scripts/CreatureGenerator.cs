@@ -228,14 +228,26 @@ public class CreatureGenerator : MonoBehaviour
         BMesh bmesh = GetComponent<BMesh>();
         bmesh.Generate();
 
-        if (skeleton != null)
+        RebuildSkeletonIfPresent();
+    }
+
+    // Rebuilds the skeleton/animation rig if one already existed, preserving
+    // whether it was animated -- used here by MutatePart(), and by
+    // NodeEditController after it edits a Node hierarchy out from under a
+    // creature (a node move/add/delete needs the skeleton re-bound to the new
+    // node layout, exactly like a mutation does).
+    public void RebuildSkeletonIfPresent()
+    {
+        if (skeleton == null)
         {
-            bool hadAnimation = rig != null;
-            AddSkeleton();
-            if (hadAnimation)
-            {
-                AddIdleAnimation();
-            }
+            return;
+        }
+
+        bool hadAnimation = rig != null;
+        AddSkeleton();
+        if (hadAnimation)
+        {
+            AddIdleAnimation();
         }
     }
 

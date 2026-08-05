@@ -95,13 +95,6 @@ public static class BMeshGenerator
 
             List<int> vind = new List<int>();
             List<Vector3> points = new List<Vector3>();
-
-            var verts = new List<Vector3>();
-            var tris = new List<int>();
-            var normals = new List<Vector3>();
-
-            var calc = new ConvexHullCalculator();
-
             Dictionary<Vector3, int> map = new Dictionary<Vector3, int>();
 
             int subCount = 0;
@@ -111,9 +104,6 @@ public static class BMeshGenerator
                 if (nc != null)
                 {
                     var points2 = new List<Vector3>();
-                    var verts2 = new List<Vector3>();
-                    var tris2 = new List<int>();
-                    var norm2 = new List<Vector3>();
                     Dictionary<Vector3, int> map2 = new Dictionary<Vector3, int>();
 
                     for (int j = 0; j < VERTICES_PER_NODE; j++)
@@ -127,23 +117,7 @@ public static class BMeshGenerator
                         map2[vertices[val2]] = val2;
                     }
 
-                    // Degenerate point sets (e.g. coplanar -- can happen right after
-                    // interactively adding/moving a node into a flat arrangement)
-                    // make the hull calculator throw. Skip just this junction's
-                    // triangles rather than crashing the whole mesh generation.
-                    try
-                    {
-                        var calc2 = new ConvexHullCalculator();
-                        calc2.GenerateHull(points2, false, ref verts2, ref tris2, ref norm2);
-                        foreach (int j in tris2)
-                        {
-                            triangles.Add(map2[verts2[j]]);
-                        }
-                    }
-                    catch (System.ArgumentException e)
-                    {
-                        Debug.LogWarning($"BMeshGenerator: skipped a degenerate junction hull ({e.Message})");
-                    }
+                    TryAddHullTriangles(points2, map2, triangles);
                     subCount++;
                 }
             }
@@ -180,18 +154,32 @@ public static class BMeshGenerator
                 points.Add(vertices[i]);
             }
 
-            try
+            TryAddHullTriangles(points, map, triangles);
+        }
+    }
+
+    // Shared by both hull sites above: ConvexHullCalculator throws for
+    // degenerate (e.g. coplanar) point sets, which can happen right after a
+    // node is interactively added/moved into a flat arrangement -- skip just
+    // that junction's triangles rather than crashing the whole mesh generation.
+    private static void TryAddHullTriangles(List<Vector3> points, Dictionary<Vector3, int> map, List<int> triangles)
+    {
+        var verts = new List<Vector3>();
+        var tris = new List<int>();
+        var normals = new List<Vector3>();
+
+        try
+        {
+            var calc = new ConvexHullCalculator();
+            calc.GenerateHull(points, false, ref verts, ref tris, ref normals);
+            foreach (int i in tris)
             {
-                calc.GenerateHull(points, false, ref verts, ref tris, ref normals);
-                foreach (int i in tris)
-                {
-                    triangles.Add(map[verts[i]]);
-                }
+                triangles.Add(map[verts[i]]);
             }
-            catch (System.ArgumentException e)
-            {
-                Debug.LogWarning($"BMeshGenerator: skipped a degenerate junction hull ({e.Message})");
-            }
+        }
+        catch (System.ArgumentException e)
+        {
+            Debug.LogWarning($"BMeshGenerator: skipped a degenerate junction hull ({e.Message})");
         }
     }
 

@@ -39,6 +39,8 @@ public class NodeEditController : MonoBehaviour
 
     private readonly Dictionary<Node, GameObject> nodeMarkers = new Dictionary<Node, GameObject>();
     private Material nodeMarkerMaterial;
+    private readonly HashSet<Node> seenNodes = new HashSet<Node>();
+    private readonly List<Node> staleNodes = new List<Node>();
 
     // ------ Undo/redo ------
     // A linear history of (undo, redo) action pairs, PrimeTween/DOTween-style:
@@ -57,8 +59,9 @@ public class NodeEditController : MonoBehaviour
 
     void Update()
     {
-        EnsureCollidersOnAllNodes();
-        UpdateNodeMarkers();
+        Node[] allNodes = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
+        EnsureCollidersOnAllNodes(allNodes);
+        UpdateNodeMarkers(allNodes);
         UpdateSelectedMarkerPosition();
         HandleSelectionAndDrag();
         HandleKeyboardActions();
@@ -87,12 +90,11 @@ public class NodeEditController : MonoBehaviour
     // but AddSkeleton() itself sets that same mode (to hide the static mesh
     // behind the skinned one) on every animated creature, which is the
     // default, so markers ended up on unconditionally. Explicit toggle only.
-    void UpdateNodeMarkers()
+    void UpdateNodeMarkers(Node[] allNodes)
     {
-        Node[] all = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
-        HashSet<Node> seen = new HashSet<Node>();
+        seenNodes.Clear();
 
-        foreach (Node node in all)
+        foreach (Node node in allNodes)
         {
             if (node == selected || !(liveEditing || showNodes))
             {
@@ -107,23 +109,20 @@ public class NodeEditController : MonoBehaviour
             }
             nodeMarker.transform.position = ResolveMarkerPosition(node);
             nodeMarker.transform.localScale = Vector3.one * Mathf.Max(node.size * 0.2f, 0.1f);
-            seen.Add(node);
+            seenNodes.Add(node);
         }
 
-        List<Node> stale = null;
+        staleNodes.Clear();
         foreach (Node node in nodeMarkers.Keys)
         {
-            if (!seen.Contains(node))
+            if (!seenNodes.Contains(node))
             {
-                (stale ??= new List<Node>()).Add(node);
+                staleNodes.Add(node);
             }
         }
-        if (stale != null)
+        foreach (Node node in staleNodes)
         {
-            foreach (Node node in stale)
-            {
-                RemoveNodeMarker(node);
-            }
+            RemoveNodeMarker(node);
         }
     }
 
@@ -157,11 +156,20 @@ public class NodeEditController : MonoBehaviour
             nodeMarkerMaterial.color = new Color(0.3f, 0.8f, 1f, 0.6f); // dim cyan, distinct from the yellow/orange selection marker
         }
 
-        GameObject nodeMarker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        nodeMarker.name = "NodeMarker";
-        Object.Destroy(nodeMarker.GetComponent<Collider>());
-        nodeMarker.GetComponent<Renderer>().material = nodeMarkerMaterial;
-        return nodeMarker;
+        return CreateXRayMarkerSphere("NodeMarker", nodeMarkerMaterial);
+    }
+
+    // Shared by the selection marker (Select()) and per-node markers
+    // (CreateNodeMarker() above): an unlit sphere using the given
+    // Custom/XRayMarker material (ZTest Always, so it stays visible through
+    // the creature's own mesh) with no collider of its own.
+    static GameObject CreateXRayMarkerSphere(string name, Material material)
+    {
+        GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        sphere.name = name;
+        Object.Destroy(sphere.GetComponent<Collider>());
+        sphere.GetComponent<Renderer>().material = material;
+        return sphere;
     }
 
     void RemoveNodeMarker(Node node)
@@ -320,15 +328,11 @@ public class NodeEditController : MonoBehaviour
 
         if (marker == null)
         {
-            marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            marker.name = "NodeSelectionMarker";
-            Object.Destroy(marker.GetComponent<Collider>());
-
             // ZTest Always so the marker stays visible through the creature's
             // own mesh instead of being hidden inside it (a selected node's
             // position is very often inside the body, not on its surface).
             markerMaterial = new Material(Shader.Find("Custom/XRayMarker"));
-            marker.GetComponent<Renderer>().material = markerMaterial;
+            marker = CreateXRayMarkerSphere("NodeSelectionMarker", markerMaterial);
         }
 
         markerMaterial.color = selectedColor;
@@ -549,17 +553,7 @@ public class NodeEditController : MonoBehaviour
         }
 
         bmesh.Generate();
-
-        CreatureGenerator generator = bmesh.GetComponent<CreatureGenerator>();
-        if (generator != null && generator.skeleton != null)
-        {
-            bool hadAnimation = generator.rig != null;
-            generator.AddSkeleton();
-            if (hadAnimation)
-            {
-                generator.AddIdleAnimation();
-            }
-        }
+        bmesh.GetComponent<CreatureGenerator>()?.RebuildSkeletonIfPresent();
     }
 
     // Falls back to any active camera if Camera.main is unset (e.g. the scene
@@ -577,12 +571,15 @@ public class NodeEditController : MonoBehaviour
 
     // Node GameObjects have no collider by default (BMesh only needs the Node
     // component + transform), so raycasting for selection needs one added.
-    // Simple linear scan each frame -- cheap for the node counts this project
-    // generates, and avoids coupling this controller to whichever script just
-    // created new nodes (CreatureGenerator, this controller's own AddChildNode, ...).
-    void EnsureCollidersOnAllNodes()
+    // Takes the same per-frame Node scan Update() already did for
+    // UpdateNodeMarkers rather than re-querying the scene itself -- cheap
+    // either way for the node counts this project generates, but no reason to
+    // pay for the query twice. Avoids coupling this controller to whichever
+    // script just created new nodes (CreatureGenerator, this controller's own
+    // AddChildNode, ...).
+    void EnsureCollidersOnAllNodes(Node[] allNodes)
     {
-        foreach (Node node in Object.FindObjectsByType<Node>(FindObjectsSortMode.None))
+        foreach (Node node in allNodes)
         {
             EnsureCollider(node);
         }

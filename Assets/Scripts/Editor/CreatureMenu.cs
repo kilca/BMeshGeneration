@@ -46,7 +46,8 @@ public static class CreatureMenu
     // NodeEditController (left-click to select/drag nodes, keyboard for
     // resize/add/delete) to the main camera, if any -- called from both menu
     // items above so neither entry point into creature generation leaves you
-    // without a way to look at and hand-edit whatever gets generated.
+    // without a way to look at and hand-edit whatever gets generated. Shared
+    // with CreatureGeneratorUI's runtime equivalent via CameraToolsSetup.
     static void EnsureCameraTools()
     {
         if (Camera.main == null)
@@ -54,14 +55,6 @@ public static class CreatureMenu
             return;
         }
 
-        GameObject cameraObject = Camera.main.gameObject;
-        if (cameraObject.GetComponent<OrbitCamera>() == null)
-        {
-            Undo.AddComponent<OrbitCamera>(cameraObject);
-        }
-        if (cameraObject.GetComponent<NodeEditController>() == null)
-        {
-            Undo.AddComponent<NodeEditController>(cameraObject);
-        }
+        CameraToolsSetup.EnsureCameraTools(Camera.main.gameObject, useUndo: true);
     }
 }

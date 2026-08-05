@@ -121,15 +121,7 @@ public class CreatureGeneratorUI : MonoBehaviour
             return;
         }
 
-        GameObject cameraObject = Camera.main.gameObject;
-        if (cameraObject.GetComponent<OrbitCamera>() == null)
-        {
-            cameraObject.AddComponent<OrbitCamera>();
-        }
-        if (cameraObject.GetComponent<NodeEditController>() == null)
-        {
-            cameraObject.AddComponent<NodeEditController>();
-        }
+        CameraToolsSetup.EnsureCameraTools(Camera.main.gameObject, useUndo: false);
     }
 
     private VisualElement BuildGeneratorPanel()
@@ -245,7 +237,7 @@ public class CreatureGeneratorUI : MonoBehaviour
         // Lives on NodeEditController (the camera), not on this CreatureGenerator --
         // EnsureCameraTools() (called in OnEnable, before this) guarantees it's
         // there whenever Camera.main exists.
-        NodeEditController nodeEditController = Camera.main != null ? Camera.main.GetComponent<NodeEditController>() : null;
+        NodeEditController nodeEditController = GetMainCameraComponent<NodeEditController>();
         if (nodeEditController != null)
         {
             Toggle liveEditToggle = new Toggle("Live Node Editing") { value = nodeEditController.liveEditing };
@@ -412,10 +404,7 @@ public class CreatureGeneratorUI : MonoBehaviour
         creatureNameDisplay.style.paddingRight = 18;
         creatureNameDisplay.style.paddingTop = 4;
         creatureNameDisplay.style.paddingBottom = 4;
-        creatureNameDisplay.style.borderTopLeftRadius = 14;
-        creatureNameDisplay.style.borderTopRightRadius = 14;
-        creatureNameDisplay.style.borderBottomLeftRadius = 14;
-        creatureNameDisplay.style.borderBottomRightRadius = 14;
+        SetBorderRadius(creatureNameDisplay, 14);
 
         container.Add(creatureNameDisplay);
         return container;
@@ -444,10 +433,7 @@ public class CreatureGeneratorUI : MonoBehaviour
         pill.style.paddingRight = 4;
         pill.style.paddingTop = 4;
         pill.style.paddingBottom = 4;
-        pill.style.borderTopLeftRadius = 8;
-        pill.style.borderTopRightRadius = 8;
-        pill.style.borderBottomLeftRadius = 8;
-        pill.style.borderBottomRightRadius = 8;
+        SetBorderRadius(pill, 8);
 
         singleModeButton = new Button(() => SetMode(GenerationMode.Single)) { text = "Single" };
         multipleModeButton = new Button(() => SetMode(GenerationMode.Multiple)) { text = "Multiple" };
@@ -544,10 +530,7 @@ public class CreatureGeneratorUI : MonoBehaviour
         toast.style.paddingRight = 8;
         toast.style.paddingTop = 6;
         toast.style.paddingBottom = 6;
-        toast.style.borderTopLeftRadius = 4;
-        toast.style.borderTopRightRadius = 4;
-        toast.style.borderBottomLeftRadius = 4;
-        toast.style.borderBottomRightRadius = 4;
+        SetBorderRadius(toast, 4);
 
         errorToastContainer.Add(toast);
         StartCoroutine(RemoveToastAfterDelay(toast));
@@ -557,6 +540,14 @@ public class CreatureGeneratorUI : MonoBehaviour
     {
         yield return new WaitForSeconds(errorToastLifetime);
         toast.RemoveFromHierarchy();
+    }
+
+    private static void SetBorderRadius(VisualElement element, float radius)
+    {
+        element.style.borderTopLeftRadius = radius;
+        element.style.borderTopRightRadius = radius;
+        element.style.borderBottomLeftRadius = radius;
+        element.style.borderBottomRightRadius = radius;
     }
 
     private static void StylePanel(VisualElement element, float? top = null, float? left = null, float? bottom = null, float? right = null)
@@ -572,10 +563,7 @@ public class CreatureGeneratorUI : MonoBehaviour
         element.style.paddingTop = 8;
         element.style.paddingBottom = 12;
         element.style.backgroundColor = new Color(0f, 0f, 0f, 0.6f);
-        element.style.borderTopLeftRadius = 6;
-        element.style.borderTopRightRadius = 6;
-        element.style.borderBottomLeftRadius = 6;
-        element.style.borderBottomRightRadius = 6;
+        SetBorderRadius(element, 6);
         // `color` is inherited in USS, so this also covers the Foldout's own
         // header label plus every control added inside it.
         element.style.color = Color.white;
@@ -642,10 +630,7 @@ public class CreatureGeneratorUI : MonoBehaviour
             {
                 input.style.backgroundColor = new Color(1f, 1f, 1f, 0.15f);
                 input.style.color = Color.white;
-                input.style.borderTopLeftRadius = 3;
-                input.style.borderTopRightRadius = 3;
-                input.style.borderBottomLeftRadius = 3;
-                input.style.borderBottomRightRadius = 3;
+                SetBorderRadius(input, 3);
             }
         }
     }
@@ -659,10 +644,7 @@ public class CreatureGeneratorUI : MonoBehaviour
         button.style.paddingTop = 6;
         button.style.paddingBottom = 6;
         button.style.marginTop = 6;
-        button.style.borderTopLeftRadius = 4;
-        button.style.borderTopRightRadius = 4;
-        button.style.borderBottomLeftRadius = 4;
-        button.style.borderBottomRightRadius = 4;
+        SetBorderRadius(button, 4);
         button.style.borderTopWidth = 0;
         button.style.borderBottomWidth = 0;
         button.style.borderLeftWidth = 0;
@@ -754,7 +736,7 @@ public class CreatureGeneratorUI : MonoBehaviour
 
         generatorRef.Clear();
 
-        NodeEditController nodeEditController = Camera.main != null ? Camera.main.GetComponent<NodeEditController>() : null;
+        NodeEditController nodeEditController = GetMainCameraComponent<NodeEditController>();
         if (nodeEditController == null)
         {
             statusLabel.text = "Cleared";
@@ -903,12 +885,7 @@ public class CreatureGeneratorUI : MonoBehaviour
 
     private static void FrameCamera(Vector3 center, float radius, Transform followTarget)
     {
-        if (Camera.main == null)
-        {
-            return;
-        }
-
-        OrbitCamera orbitCamera = Camera.main.GetComponent<OrbitCamera>();
+        OrbitCamera orbitCamera = GetMainCameraComponent<OrbitCamera>();
         if (orbitCamera != null)
         {
             orbitCamera.Frame(center, radius, followTarget);
@@ -922,16 +899,20 @@ public class CreatureGeneratorUI : MonoBehaviour
         go.AddComponent<BMesh>();
         CreatureGenerator generator = go.AddComponent<CreatureGenerator>();
 
-        if (Camera.main != null)
+        OrbitCamera orbitCamera = GetMainCameraComponent<OrbitCamera>();
+        if (orbitCamera != null)
         {
-            OrbitCamera orbitCamera = Camera.main.GetComponent<OrbitCamera>();
-            if (orbitCamera != null)
-            {
-                orbitCamera.target = go.transform;
-            }
+            orbitCamera.target = go.transform;
         }
 
         return generator;
+    }
+
+    // Camera.main is only ever null-checked here for this one purpose --
+    // fetching a component off it -- across the whole file.
+    private static T GetMainCameraComponent<T>() where T : Component
+    {
+        return Camera.main != null ? Camera.main.GetComponent<T>() : null;
     }
 
     private static Vector3 DefaultSpawnPosition()

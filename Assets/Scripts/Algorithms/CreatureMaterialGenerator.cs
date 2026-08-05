@@ -60,16 +60,12 @@ public static class CreatureMaterialGenerator
 
             // DestroyImmediate is only safe outside play mode; a build (or the
             // editor while playing) must use Destroy instead.
-            if (Application.isPlaying)
+            System.Action<Object> destroy = Application.isPlaying ? Object.Destroy : Object.DestroyImmediate;
+            if (ownsTexture)
             {
-                if (ownsTexture) Object.Destroy(bmesh.normalMaterial.mainTexture);
-                Object.Destroy(bmesh.normalMaterial);
+                destroy(bmesh.normalMaterial.mainTexture);
             }
-            else
-            {
-                if (ownsTexture) Object.DestroyImmediate(bmesh.normalMaterial.mainTexture);
-                Object.DestroyImmediate(bmesh.normalMaterial);
-            }
+            destroy(bmesh.normalMaterial);
         }
 
         bmesh.normalMaterial = GenerateMaterial();
@@ -149,15 +145,18 @@ public static class CreatureMaterialGenerator
         float offsetX = Random.Range(0f, 1000f);
         float offsetY = Random.Range(0f, 1000f);
 
-        Texture2D texture = new Texture2D(width, height) { name = GeneratedTextureName };
+        Color[] pixels = new Color[width * height];
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
             {
                 float n = Mathf.PerlinNoise(x / (float)width * noiseScale + offsetX, y / (float)height * noiseScale + offsetY);
-                texture.SetPixel(x, y, Color.Lerp(baseColor, spotColor, n));
+                pixels[y * width + x] = Color.Lerp(baseColor, spotColor, n);
             }
         }
+
+        Texture2D texture = new Texture2D(width, height) { name = GeneratedTextureName };
+        texture.SetPixels(pixels);
         texture.Apply();
         texture.wrapMode = TextureWrapMode.Repeat;
 

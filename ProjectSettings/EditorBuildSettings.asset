@@ -4,5 +4,9 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/AutoGeneration.unity
+    guid: af81f888c7cc8124c875a4aea8cd0b1d
   m_configObjects: {}
+  m_UseUCBPForAssetBundles: 0
