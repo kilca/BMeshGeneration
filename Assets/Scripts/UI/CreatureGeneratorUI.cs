@@ -79,6 +79,11 @@ public class CreatureGeneratorUI : MonoBehaviour
         // nothing, with no obvious cause.
         EnsureCameraTools();
 
+        // Covers both a true zero-setup start (no target at all) and a scene
+        // that already wires up a target CreatureGenerator in the Inspector
+        // but hasn't generated a body for it yet (e.g. AutoGeneration.unity) --
+        // either way, there's nothing to show yet unless we generate one now.
+        bool needsInitialGeneration = target == null || target.body == null;
         if (target == null)
         {
             target = CreateCreature();
@@ -93,6 +98,21 @@ public class CreatureGeneratorUI : MonoBehaviour
         root.Add(BuildErrorToastContainer());
 
         Application.logMessageReceived += HandleLogMessage;
+
+        if (needsInitialGeneration)
+        {
+            // Default startup creature: fixed and reproducible rather than
+            // blank or randomly seeded. Only overrides the seed for this one
+            // generation -- randomizeSeedOnGenerate is restored right after,
+            // so every later Generate() (R key, button, batch) still
+            // randomizes normally instead of getting stuck reproducing this
+            // same creature forever.
+            bool randomizeAfterwards = target.randomizeSeedOnGenerate;
+            target.randomizeSeedOnGenerate = false;
+            target.seed = 2075170032;
+            GenerateCreature();
+            target.randomizeSeedOnGenerate = randomizeAfterwards;
+        }
     }
 
     void OnDisable()
@@ -129,17 +149,26 @@ public class CreatureGeneratorUI : MonoBehaviour
         Foldout foldout = new Foldout { text = "Creature Generator", value = true };
         StylePanel(foldout, top: 16, left: 16);
 
+        // The panel's own content (all the sections below) can get taller than
+        // the viewport -- especially the Shape/Size/Branching tuning foldouts
+        // expanded together, or a short WebGL canvas -- so it scrolls inside a
+        // capped-height ScrollView instead of the Foldout just growing off the
+        // bottom of the screen. The Foldout's own header stays outside the
+        // ScrollView, so it's always visible even while scrolled.
+        ScrollView scrollView = CreatePanelScrollView();
+        foldout.Add(scrollView);
+
         // ------ Customization shared by Single and Multiple ------
 
         SliderInt complexitySlider = new SliderInt("Complexity", 1, 4) { value = target.complexity };
         complexitySlider.RegisterValueChangedCallback(evt => target.complexity = evt.newValue);
         Style(complexitySlider);
-        foldout.Add(complexitySlider);
+        scrollView.Add(complexitySlider);
 
         Toggle eyesToggle = new Toggle("Add Eyes") { value = target.addEyes };
         eyesToggle.RegisterValueChangedCallback(evt => target.addEyes = evt.newValue);
         Style(eyesToggle);
-        foldout.Add(eyesToggle);
+        scrollView.Add(eyesToggle);
 
         // Skin is always applied by Generate(); this picks whether/how the
         // skeleton is animated on top of it (see CreatureIdleSway).
@@ -152,42 +181,42 @@ public class CreatureGeneratorUI : MonoBehaviour
             target.ApplyAnimationMode();
         });
         Style(animationModeField);
-        foldout.Add(animationModeField);
+        scrollView.Add(animationModeField);
 
         // ------ Single-mode-only controls ------
 
         singleModeSection = new VisualElement();
-        foldout.Add(singleModeSection);
+        scrollView.Add(singleModeSection);
         BuildSingleModeSection(singleModeSection);
 
         // ------ Multiple-mode-only controls ------
 
         multipleModeSection = new VisualElement();
         multipleModeSection.style.display = DisplayStyle.None;
-        foldout.Add(multipleModeSection);
+        scrollView.Add(multipleModeSection);
         BuildMultipleModeSection(multipleModeSection);
 
         // ------ Generation bias tuning ------
 
-        foldout.Add(BuildShapeSection());
-        foldout.Add(BuildSizeSection());
-        foldout.Add(BuildBranchingSection());
+        scrollView.Add(BuildShapeSection());
+        scrollView.Add(BuildSizeSection());
+        scrollView.Add(BuildBranchingSection());
 
         // ------ Actions ------
 
         Button generateButton = new Button(GenerateCreature) { text = "Generate (R)" };
         StyleButton(generateButton);
-        foldout.Add(generateButton);
+        scrollView.Add(generateButton);
 
         Button clearButton = new Button(ClearCreature) { text = "Clear" };
         StyleButton(clearButton, destructive: true);
-        foldout.Add(clearButton);
+        scrollView.Add(clearButton);
 
         statusLabel = new Label(string.Empty);
         statusLabel.style.color = Color.white;
         statusLabel.style.marginTop = 6;
         statusLabel.style.whiteSpace = WhiteSpace.Normal;
-        foldout.Add(statusLabel);
+        scrollView.Add(statusLabel);
 
         return foldout;
     }
@@ -357,6 +386,9 @@ public class CreatureGeneratorUI : MonoBehaviour
         Foldout foldout = new Foldout { text = "Shortcuts", value = false };
         StylePanel(foldout, bottom: 16, right: 16);
 
+        ScrollView scrollView = CreatePanelScrollView();
+        foldout.Add(scrollView);
+
         foreach ((string key, string description) in Shortcuts)
         {
             VisualElement row = new VisualElement();
@@ -378,7 +410,7 @@ public class CreatureGeneratorUI : MonoBehaviour
             descriptionLabel.style.flexShrink = 1;
             row.Add(descriptionLabel);
 
-            foldout.Add(row);
+            scrollView.Add(row);
         }
 
         return foldout;
@@ -568,6 +600,18 @@ public class CreatureGeneratorUI : MonoBehaviour
         // header label plus every control added inside it.
         element.style.color = Color.white;
 
+        // Cap the panel to a share of the screen instead of letting it grow
+        // past the bottom -- both the generator panel (every tuning foldout
+        // expanded) and the shortcuts list can get taller than a short WebGL
+        // canvas. `maxHeight` resolves against the actual viewport, not an
+        // auto-sized ancestor, because this element itself is
+        // Position.Absolute -- same reasoning as the top/left/bottom/right
+        // offsets above. The ScrollView added inside (see
+        // CreatePanelScrollView) is what actually scrolls once this cap
+        // kicks in.
+        element.style.maxHeight = Length.Percent(80);
+        element.style.overflow = Overflow.Hidden;
+
         // Foldout indents its content by default (unity-foldout__content has
         // its own left margin on top of this panel's own padding) -- between
         // the two, field labels/values had noticeably less room than the
@@ -577,7 +621,54 @@ public class CreatureGeneratorUI : MonoBehaviour
         {
             content.style.marginLeft = 0;
             content.style.paddingLeft = 0;
+            // Let the content row (and the ScrollView inside it) shrink
+            // below its natural size instead of pushing the panel past
+            // maxHeight -- flexbox's default min-height:auto would otherwise
+            // keep it at full content size and defeat the cap above.
+            content.style.flexGrow = 1;
+            content.style.minHeight = 0;
         }
+
+        // The header toggle (the foldout's clickable title bar) must keep
+        // its own size always -- only the scrollable content below it should
+        // give up space when the panel is capped.
+        Toggle header = element.Q<Toggle>(className: "unity-foldout__toggle");
+        if (header != null)
+        {
+            header.style.flexShrink = 0;
+        }
+    }
+
+    // Used inside both BuildGeneratorPanel and BuildKeybindingsPanel so their
+    // (potentially long) content scrolls within StylePanel's maxHeight cap
+    // instead of the panel growing past the bottom of the screen.
+    private static ScrollView CreatePanelScrollView()
+    {
+        ScrollView scrollView = new ScrollView(ScrollViewMode.Vertical);
+        scrollView.style.flexGrow = 1;
+        scrollView.style.minHeight = 0;
+
+        // The default runtime scroller is a wide track with chunky up/down
+        // step buttons -- slim it down to a plain thin thumb, more in
+        // keeping with this panel's minimal styling and its 320px width.
+        VisualElement verticalScroller = scrollView.Q(className: "unity-scroller--vertical");
+        if (verticalScroller != null)
+        {
+            verticalScroller.style.width = 8;
+            verticalScroller.style.marginLeft = 2;
+
+            verticalScroller.Q(className: "unity-scroller__low-button")?.RemoveFromHierarchy();
+            verticalScroller.Q(className: "unity-scroller__high-button")?.RemoveFromHierarchy();
+
+            VisualElement dragger = verticalScroller.Q(className: "unity-base-slider__dragger");
+            if (dragger != null)
+            {
+                dragger.style.backgroundColor = new Color(1f, 1f, 1f, 0.35f);
+                SetBorderRadius(dragger, 4);
+            }
+        }
+
+        return scrollView;
     }
 
     // Without an explicit PanelSettings theme (see panelSettingsOverride), a
