@@ -16,6 +16,12 @@ public class BMesh : MonoBehaviour
 
     public ShowMode showMode;
 
+    // Set by BMeshBoneExtensions.CreateSkeleton, cleared by
+    // CreatureGenerator.ClearSkeleton. While set, the static MeshRenderer stays
+    // hidden and the Show Mode drives which of these renders.
+    [System.NonSerialized] public SkinnedMeshRenderer skinnedRenderer;
+    [System.NonSerialized] public SkinnedMeshRenderer wireframeRenderer;
+
     public bool updateRealTime = false;
 
     private List<Vector3> vertices;
@@ -104,6 +110,29 @@ public class BMesh : MonoBehaviour
             Generate();
 
         MeshRenderer meshR = GetComponent<MeshRenderer>();
+
+        bool hideMesh = showMode == ShowMode.Gizmo || showMode == ShowMode.Vertices;
+        bool wire = showMode == ShowMode.Wireframe && wireframeRenderer != null;
+
+        // A skinned copy is driving the visible creature (see
+        // BMeshBoneExtensions.CreateSkeleton) -- keep the static mesh hidden so
+        // the two don't overlap, and let the Show Mode pick which skinned copy
+        // renders (Gizmo/Vertices hide both -- structure view).
+        if (skinnedRenderer != null)
+        {
+            meshR.enabled = false;
+            skinnedRenderer.enabled = !hideMesh && !wire;
+            if (wireframeRenderer != null)
+            {
+                wireframeRenderer.enabled = wire;
+            }
+            if (skinnedRenderer.enabled)
+            {
+                skinnedRenderer.material = normalMaterial;
+            }
+            return;
+        }
+
         switch (showMode)
         {
             case ShowMode.Gizmo:

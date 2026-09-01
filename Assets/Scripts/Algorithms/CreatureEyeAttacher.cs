@@ -202,6 +202,7 @@ public static class CreatureEyeAttacher
         eye.transform.localPosition = localPosition;
         eye.transform.rotation = Quaternion.LookRotation(dir, upHint);
         eye.transform.localScale = Vector3.one * eyeScale;
+        eye.AddComponent<CreatureEye>();
 
         // Capture the eye's offset relative to its Node now, while the Node
         // hierarchy is still the only thing driving it (see FollowTransform) --

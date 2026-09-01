@@ -23,11 +23,31 @@ public class NodeEditController : MonoBehaviour
     public Color selectedColor = Color.yellow;
     public Color draggingColor = new Color(1f, 0.35f, 0.1f);
 
-    [Tooltip("Rebuild the mesh (and skeleton, if any) every frame while dragging a node, instead of only when the drag ends. More responsive, but costs a full BMesh regeneration per frame.")]
-    public bool liveEditing = false;
+    [SerializeField]
+    [Tooltip("Master switch for all manual node editing: shows a marker on every node and enables click-select / drag / the keyboard shortcuts. Off = view only. The mesh rebuilds when a drag ends.")]
+    private bool _editNodes = false;
 
-    [Tooltip("Show a small marker on every node, not just the selected one -- useful to see what's clickable. Also on automatically while Live Node Editing is on.")]
-    public bool showNodes = false;
+    public bool editNodes
+    {
+        get => _editNodes;
+        set
+        {
+            if (_editNodes == value)
+            {
+                return;
+            }
+            _editNodes = value;
+            if (!_editNodes)
+            {
+                Deselect();
+            }
+        }
+    }
+
+    // Read-only marker view: shows a marker on every node without enabling
+    // select/drag. Set by the panel's Gizmo show-mode. Markers appear when this
+    // OR editNodes is on.
+    [System.NonSerialized] public bool showNodes = false;
 
     private Node selected;
     private GameObject marker;
@@ -60,8 +80,14 @@ public class NodeEditController : MonoBehaviour
     void Update()
     {
         Node[] allNodes = Object.FindObjectsByType<Node>(FindObjectsSortMode.None);
-        EnsureCollidersOnAllNodes(allNodes);
         UpdateNodeMarkers(allNodes);
+
+        if (!_editNodes)
+        {
+            return; // view only -- no colliders, selection, drag or shortcuts
+        }
+
+        EnsureCollidersOnAllNodes(allNodes);
         UpdateSelectedMarkerPosition();
         HandleSelectionAndDrag();
         HandleKeyboardActions();
@@ -80,23 +106,17 @@ public class NodeEditController : MonoBehaviour
         marker.transform.position = ResolveMarkerPosition(selected);
     }
 
-    // BMesh's own Gizmo/Vertices show modes hide the MeshRenderer and rely on
-    // Node.OnDrawGizmos for feedback -- but Gizmos only render in the Scene
-    // view, never in the Game view a Play-mode build/panel actually looks at,
-    // so those modes appeared to just show nothing. This gives every node a
-    // small always-on-top marker (same X-ray trick as the selection marker)
-    // that's actually visible at runtime, shown only while showNodes or
-    // liveEditing is on -- earlier this was also tied to showMode == Gizmo,
-    // but AddSkeleton() itself sets that same mode (to hide the static mesh
-    // behind the skinned one) on every animated creature, which is the
-    // default, so markers ended up on unconditionally. Explicit toggle only.
+    // Gives every node a small always-on-top marker (Gizmos only render in the
+    // Scene view, never the Game view a build looks at). Shown while Edit Nodes
+    // or the read-only Gizmo view (showNodes) is on.
     void UpdateNodeMarkers(Node[] allNodes)
     {
+        bool markersOn = _editNodes || showNodes;
         seenNodes.Clear();
 
         foreach (Node node in allNodes)
         {
-            if (node == selected || !(liveEditing || showNodes))
+            if (node == selected || !markersOn)
             {
                 RemoveNodeMarker(node);
                 continue;
@@ -222,10 +242,6 @@ public class NodeEditController : MonoBehaviour
             {
                 selected.transform.position = ray.GetPoint(enter) + dragOffset;
                 marker.transform.position = selected.transform.position;
-                if (liveEditing)
-                {
-                    RegenerateMesh(selected);
-                }
             }
         }
 
@@ -464,7 +480,7 @@ public class NodeEditController : MonoBehaviour
         // Captured before destroying so undo can rebuild the same shape --
         // note this only restores Node structure (position/size/hierarchy), not
         // decorations like eyes, which CreatureIO doesn't track.
-        CreatureNodeData snapshot = CreatureIO.CaptureHierarchy(selected);
+        CreatureNodeData[] snapshot = CreatureIO.CaptureSubtree(selected);
         Deselect();
 
         Tween.Scale(toDelete.transform, Vector3.zero, popDuration, Ease.InBack).OnComplete(() =>
@@ -481,7 +497,7 @@ public class NodeEditController : MonoBehaviour
         RecordAction(
             () =>
             {
-                restored = CreatureIO.BuildHierarchy(snapshot, parentTransform, null);
+                restored = CreatureIO.BuildSubtree(snapshot, parentTransform, null);
                 foreach (Node n in restored.GetComponentsInChildren<Node>())
                 {
                     EnsureCollider(n);

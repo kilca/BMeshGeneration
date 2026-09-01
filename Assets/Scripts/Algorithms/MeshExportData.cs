@@ -74,63 +74,63 @@ public static class MeshExporter
         return exportData;
     }
 
+    // Envelope weighting: each vertex is bound to the bone whose SEGMENT (the
+    // line from its parent bone to itself) it sits closest to, and blended with
+    // that parent by how far along the segment it projects. Two influences, both
+    // adjacent in the skeleton -- so a vertex can never pick up weight from an
+    // unrelated limb the way a global nearest-bone search does (that was the
+    // cause of "the fingertip only follows the shoulder at 50%").
     public static BoneWeight[] GenerateBoneWeights(Vector3[] vertices, List<BoneData> bones)
     {
         BoneWeight[] weights = new BoneWeight[vertices.Length];
+        if (bones == null || bones.Count == 0)
+        {
+            return weights;
+        }
 
         for (int i = 0; i < vertices.Length; i++)
         {
-            // Find closest bones
-            List<(int index, float distance)> closestBones = new List<(int, float)>();
+            Vector3 v = vertices[i];
+
+            int bestBone = 0;
+            int bestParent = -1;
+            float bestT = 1f;
+            float bestSqrDist = float.MaxValue;
 
             for (int b = 0; b < bones.Count; b++)
             {
-                float distance = Vector3.Distance(vertices[i], bones[b].position);
-                closestBones.Add((b, distance));
+                int pi = bones[b].parentIndex;
+                Vector3 head = bones[b].position;
+                Vector3 tail = pi >= 0 && pi < bones.Count ? bones[pi].position : head;
+
+                Vector3 seg = head - tail;
+                float segLenSqr = seg.sqrMagnitude;
+                float t = segLenSqr > 1e-8f ? Mathf.Clamp01(Vector3.Dot(v - tail, seg) / segLenSqr) : 1f;
+                Vector3 closest = tail + seg * t;
+                float sqrDist = (v - closest).sqrMagnitude;
+
+                if (sqrDist < bestSqrDist)
+                {
+                    bestSqrDist = sqrDist;
+                    bestBone = b;
+                    bestParent = pi;
+                    bestT = t;
+                }
             }
 
-            // Sort by distance
-            closestBones.Sort((a, b) => a.distance.CompareTo(b.distance));
-
-            // Assign up to 4 closest bones
             BoneWeight weight = new BoneWeight();
-            float totalWeight = 0f;
-
-            if (closestBones.Count > 0)
+            if (bestParent < 0 || bestParent >= bones.Count)
             {
-                weight.boneIndex0 = closestBones[0].index;
-                weight.weight0 = 1f / (closestBones[0].distance + 0.001f);
-                totalWeight += weight.weight0;
+                weight.boneIndex0 = bestBone;
+                weight.weight0 = 1f;
             }
-
-            if (closestBones.Count > 1)
+            else
             {
-                weight.boneIndex1 = closestBones[1].index;
-                weight.weight1 = 1f / (closestBones[1].distance + 0.001f);
-                totalWeight += weight.weight1;
-            }
-
-            if (closestBones.Count > 2)
-            {
-                weight.boneIndex2 = closestBones[2].index;
-                weight.weight2 = 1f / (closestBones[2].distance + 0.001f);
-                totalWeight += weight.weight2;
-            }
-
-            if (closestBones.Count > 3)
-            {
-                weight.boneIndex3 = closestBones[3].index;
-                weight.weight3 = 1f / (closestBones[3].distance + 0.001f);
-                totalWeight += weight.weight3;
-            }
-
-            // Normalize weights
-            if (totalWeight > 0)
-            {
-                weight.weight0 /= totalWeight;
-                weight.weight1 /= totalWeight;
-                weight.weight2 /= totalWeight;
-                weight.weight3 /= totalWeight;
+                float s = bestT * bestT * (3f - 2f * bestT); // smoothstep for a softer joint
+                weight.boneIndex0 = bestBone;
+                weight.weight0 = s;
+                weight.boneIndex1 = bestParent;
+                weight.weight1 = 1f - s;
             }
 
             weights[i] = weight;

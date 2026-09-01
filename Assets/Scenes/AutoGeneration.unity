@@ -336,7 +336,7 @@ MonoBehaviour:
   rotationSpeed: 3
   zoomSpeed: 4
   startPitch: 20
-  backgroundColor: {r: 0.75, g: 0.78, b: 0.82, a: 1}
+  backgroundColor: {r: 0.09, g: 0.09, b: 0.105, a: 1}
   framingPadding: 2.2
 --- !u!114 &930549765
 MonoBehaviour:
@@ -358,8 +358,7 @@ MonoBehaviour:
   popDuration: 0.25
   selectedColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   draggingColor: {r: 1, g: 0.35, b: 0.1, a: 1}
-  liveEditing: 0
-  showNodes: 0
+  _editNodes: 0
 --- !u!1 &1811123010
 GameObject:
   m_ObjectHideFlags: 0
@@ -403,7 +402,6 @@ MonoBehaviour:
   body: {fileID: 0}
   skeleton: {fileID: 0}
   skinnedMeshObject: {fileID: 0}
-  rig: {fileID: 0}
 --- !u!114 &1811123012
 MonoBehaviour:
   m_ObjectHideFlags: 0

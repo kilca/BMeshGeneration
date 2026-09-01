@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Animations.Rigging;
 
 // Orchestrates a single creature's lifecycle: rolling a random body via
 // CreatureBodyGenerator, applying skin/eyes, and optionally rigging a bone
@@ -41,13 +40,11 @@ public class CreatureGenerator : MonoBehaviour
     [Tooltip("Root GameObject of the generated body's Node hierarchy. Set by Generate() -- treat as read-only.")]
     public GameObject body;
 
-    [Header("Bone rig (created on demand, see AddSkeleton)")]
+    [Header("Bone skeleton (created on demand, see AddSkeleton)")]
     [Tooltip("Root of the bone hierarchy built by AddSkeleton(). Destroyed and rebuilt whenever the body regenerates.")]
     public GameObject skeleton;
     [Tooltip("GameObject holding the SkinnedMeshRenderer built by AddSkeleton().")]
     public GameObject skinnedMeshObject;
-    [Tooltip("Animation Rigging constraint rig built by AddIdleAnimation(), driving the secondary-motion wobble.")]
-    public GameObject rig;
 
     public void Clear()
     {
@@ -55,31 +52,50 @@ public class CreatureGenerator : MonoBehaviour
         ClearSkeleton();
     }
 
+    // Show/hide the eyes already on the current creature (the "Add Eyes" toggle
+    // in the panel). Does not add eyes that were never generated.
+    public void SetEyesVisible(bool visible)
+    {
+        if (body == null)
+        {
+            return;
+        }
+        foreach (CreatureEye eye in GetComponentsInChildren<CreatureEye>(true))
+        {
+            eye.gameObject.SetActive(visible);
+        }
+    }
+
     // A skeleton built from a previous body is meaningless once that body is
-    // gone, so wipe it (and any animation rig sitting on top of it) too
-    // whenever the body is cleared/regenerated.
+    // gone, so wipe it (and the idle animation on top of it) too whenever the
+    // body is cleared/regenerated.
     void ClearSkeleton()
     {
+        BMesh bmesh = GetComponent<BMesh>();
+
+        // The instanced skinned + wireframe meshes aren't owned by anything else,
+        // so destroy them here or they leak on every rebuild.
+        DestroyMeshOf(bmesh.skinnedRenderer);
+        DestroyMeshOf(bmesh.wireframeRenderer);
+
         DestroyIfPresent(skeleton);
         DestroyIfPresent(skinnedMeshObject);
-        DestroyIfPresent(rig);
         skeleton = null;
         skinnedMeshObject = null;
-        rig = null;
 
         DestroyComponentIfPresent<CreatureIdleSway>();
-        DestroyComponentIfPresent<RigBuilder>();
-        DestroyComponentIfPresent<Animator>();
+        DestroyComponentIfPresent<Animation>(); // added by CreatureIdleSway's RequireComponent
 
-        // AddSkeleton() hides the static mesh via showMode = Gizmo so the
-        // skinned mesh doesn't double-render alongside it -- once the skeleton
-        // is gone (e.g. switching Animation to None via ApplyAnimationMode(),
-        // without a full Generate() to reset it), that would otherwise leave
-        // the creature invisible with nothing left to show it. Only undoes
-        // that specific auto-hide, not an explicit Vertices/Wireframe choice
-        // made independently via the Show Mode dropdown.
-        BMesh bmesh = GetComponent<BMesh>();
-        if (bmesh.showMode == BMesh.ShowMode.Gizmo)
+        // Hand rendering back to the static MeshRenderer now that the skinned
+        // copy is gone (BMesh keeps the static one hidden while skinnedRenderer
+        // is set -- see BMesh.Update).
+        bmesh.skinnedRenderer = null;
+        bmesh.wireframeRenderer = null;
+
+        // The skinned mesh was showing regardless of Show Mode; a Gizmo/Vertices
+        // mode now renders nothing, so fall back to Mesh rather than leave the
+        // creature invisible.
+        if (bmesh.showMode == BMesh.ShowMode.Gizmo || bmesh.showMode == BMesh.ShowMode.Vertices)
         {
             bmesh.showMode = BMesh.ShowMode.Mesh;
         }
@@ -101,6 +117,14 @@ public class CreatureGenerator : MonoBehaviour
         }
 
         DestroyImmediate(go);
+    }
+
+    static void DestroyMeshOf(SkinnedMeshRenderer renderer)
+    {
+        if (renderer != null && renderer.sharedMesh != null)
+        {
+            DestroyImmediate(renderer.sharedMesh);
+        }
     }
 
     void DestroyComponentIfPresent<T>() where T : Component
@@ -136,11 +160,23 @@ public class CreatureGenerator : MonoBehaviour
     public void ImportFromFile(string path)
     {
         Clear();
+        ApplyImportedRoots(CreatureIO.ImportFromFile(path, transform, nodePrefab, out string importedName), importedName, path);
+    }
 
-        List<GameObject> roots = CreatureIO.ImportFromFile(path, transform, nodePrefab, out string importedName);
+    // Same as ImportFromFile but from JSON text already in memory -- used by the
+    // WebGL file-upload path (see CreatureGeneratorUI.OnCreatureFileUploaded),
+    // where there is no file path to read.
+    public void ImportFromJson(string json)
+    {
+        Clear();
+        ApplyImportedRoots(CreatureIO.ImportFromString(json, transform, nodePrefab, out string importedName), importedName, "uploaded JSON");
+    }
+
+    void ApplyImportedRoots(List<GameObject> roots, string importedName, string source)
+    {
         if (roots.Count == 0)
         {
-            Debug.LogWarning($"CreatureGenerator: no creature found in {path}.");
+            Debug.LogWarning($"CreatureGenerator: no creature found in {source}.");
             return;
         }
 
@@ -190,7 +226,7 @@ public class CreatureGenerator : MonoBehaviour
     // which previously only took effect after a full Generate() (which also
     // rerolls the whole body, not just the animation). Only rebuilds the
     // skeleton/skin from scratch if one doesn't already exist; switching
-    // between Idle and Walking just reconfigures the existing sway/rig.
+    // between Idle and Walking just reconfigures the existing sway.
     public void ApplyAnimationMode()
     {
         if (body == null)
@@ -231,11 +267,11 @@ public class CreatureGenerator : MonoBehaviour
         RebuildSkeletonIfPresent();
     }
 
-    // Rebuilds the skeleton/animation rig if one already existed, preserving
-    // whether it was animated -- used here by MutatePart(), and by
-    // NodeEditController after it edits a Node hierarchy out from under a
-    // creature (a node move/add/delete needs the skeleton re-bound to the new
-    // node layout, exactly like a mutation does).
+    // Rebuilds the skeleton (and re-applies the idle animation) if one already
+    // existed -- used here by MutatePart(), and by NodeEditController after it
+    // edits a Node hierarchy out from under a creature (a node move/add/delete
+    // needs the skeleton re-bound to the new node layout, exactly like a
+    // mutation does). AddIdleAnimation no-ops when animationMode is None.
     public void RebuildSkeletonIfPresent()
     {
         if (skeleton == null)
@@ -243,7 +279,8 @@ public class CreatureGenerator : MonoBehaviour
             return;
         }
 
-        bool hadAnimation = rig != null;
+        // Capture before AddSkeleton -- it destroys the sway via ClearSkeleton.
+        bool hadAnimation = GetComponent<CreatureIdleSway>() != null;
         AddSkeleton();
         if (hadAnimation)
         {
@@ -290,12 +327,10 @@ public class CreatureGenerator : MonoBehaviour
         skeleton = renderer.rootBone != null ? renderer.rootBone.parent.gameObject : null;
     }
 
-    // Adds a small generic idle animation on top of an existing skeleton
-    // (BMeshBoneExtensions.AddSecondaryMotionRig): the root bone gently sways,
-    // and every other bone -- whatever limbs/tentacles this random topology
-    // happens to have -- lags behind it via a DampedTransform chain, so the
-    // whole creature wobbles organically without any per-limb setup. Requires
-    // AddSkeleton() to have been called first.
+    // Builds and plays the looping idle/walking AnimationClip on top of an
+    // existing skeleton (see CreatureIdleSway / CreatureMotion). The clip is
+    // generated from the bone hierarchy -- every bone sways around its rest pose
+    // with a phase offset by depth. Requires AddSkeleton() first.
     public void AddIdleAnimation()
     {
         if (skeleton == null || animationMode == AnimationMode.None)
@@ -303,17 +338,26 @@ public class CreatureGenerator : MonoBehaviour
             return;
         }
 
-        // Destroying and re-adding the Animator/RigBuilder here would be unsafe in
-        // play mode (Destroy() is deferred to end of frame, so a same-frame re-add
-        // could bind to the about-to-be-destroyed component) -- AddSecondaryMotionRig
-        // reuses an existing RigBuilder and clears its stale layers instead.
-        DestroyComponentIfPresent<CreatureIdleSway>();
-        DestroyIfPresent(rig);
+        SkinnedMeshRenderer smr = skinnedMeshObject != null ? skinnedMeshObject.GetComponent<SkinnedMeshRenderer>() : null;
+        if (smr == null || smr.rootBone == null)
+        {
+            return;
+        }
 
-        rig = GetComponent<BMesh>().AddSecondaryMotionRig(skeleton.transform);
-
-        CreatureIdleSway sway = gameObject.AddComponent<CreatureIdleSway>();
-        sway.rootBone = skeleton.transform.childCount > 0 ? skeleton.transform.GetChild(0) : null;
-        sway.ConfigureForMode(animationMode);
+        // Switching Idle<->Walking on a live creature: the clip is mid-play, so
+        // keep the existing component (it holds the true rest pose captured when
+        // the skeleton was fresh) and only re-tune it. A brand new skeleton has
+        // no player yet -- Initialize captures its rest pose now, while it's at
+        // rest.
+        CreatureIdleSway sway = GetComponent<CreatureIdleSway>();
+        if (sway == null)
+        {
+            sway = gameObject.AddComponent<CreatureIdleSway>();
+            sway.Initialize(smr, animationMode);
+        }
+        else
+        {
+            sway.ConfigureForMode(animationMode);
+        }
     }
 }

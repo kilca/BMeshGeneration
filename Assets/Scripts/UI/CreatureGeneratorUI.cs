@@ -1,12 +1,11 @@
 // ============================================================================
 // Runtime Creature Generator Panel (UI Toolkit)
 // ============================================================================
-// A small in-game panel to generate/customize/export a creature, a second
-// collapsible panel listing NodeEditController's shortcuts, a top-center
-// creature name display, a bottom-center Single/Multiple mode selector, and a
-// top-right temporary error/warning log. Meant to work both while testing in
-// the Editor's Play mode and, eventually, in an actual build (no UnityEditor
-// dependency anywhere in this file, unlike CreatureMenu.cs which is
+// A small in-game panel to generate/customize/export a single creature, a
+// second collapsible panel listing NodeEditController's shortcuts, a top-center
+// creature name display, and a top-right temporary toast log. Meant to work
+// both while testing in the Editor's Play mode and in an actual build (no
+// UnityEditor dependency anywhere in this file, unlike CreatureMenu.cs which is
 // editor-only). Builds its VisualElement tree entirely in code so no
 // .uxml/.uss authoring step is required to use it.
 //
@@ -30,12 +29,34 @@ public class CreatureGeneratorUI : MonoBehaviour
     [Tooltip("Optional -- assign a PanelSettings asset (Assets > Create > UI Toolkit > Panel Settings Asset) for proper default theming. If left empty, a bare one is created at runtime.")]
     public PanelSettings panelSettingsOverride;
 
+    [Tooltip("Seconds a toast (export result, error, warning) stays on screen.")]
     public float errorToastLifetime = 3.5f;
 
-    private enum GenerationMode { Single, Multiple }
+    public enum ToastKind { Info, Success, Warning, Error }
+
+    private enum ButtonKind { Primary, Destructive, Positive }
+
+    // ------ design tokens ------
+    private static readonly Color Accent = new Color(0.545f, 0.361f, 0.965f);       // #8B5CF6
+    private static readonly Color AccentDim = new Color(0.36f, 0.24f, 0.68f);
+    private static readonly Color PanelBg = new Color(0.055f, 0.055f, 0.072f, 0.94f);
+    private static readonly Color PanelBorder = new Color(1f, 1f, 1f, 0.07f);
+    private static readonly Color ControlBg = new Color(1f, 1f, 1f, 0.045f);
+    private static readonly Color ControlBorder = new Color(1f, 1f, 1f, 0.09f);
+    private static readonly Color TextPrimary = new Color(0.92f, 0.92f, 0.94f);
+    private static readonly Color TextMuted = new Color(0.55f, 0.55f, 0.61f);
+
+    private BMesh.ShowMode shownShowMode = (BMesh.ShowMode)(-1);
+    private readonly Dictionary<BMesh.ShowMode, VisualElement> showModeButtons = new Dictionary<BMesh.ShowMode, VisualElement>();
+    private VisualElement editButton;
+
+    // True whenever the pointer is over one of the panels -- read by OrbitCamera
+    // so the scroll wheel scrolls the panel instead of also zooming the camera.
+    public static bool PointerOverPanel { get; private set; }
 
     private static readonly (string key, string description)[] Shortcuts =
     {
+        ("Edit Nodes", "the toggle above -- required for everything below"),
         ("Click", "select a node"),
         ("Click + drag", "move the selected node"),
         ("Tab", "select next node"),
@@ -45,24 +66,19 @@ public class CreatureGeneratorUI : MonoBehaviour
         ("Delete / Backspace", "delete selected node"),
         ("G", "force a mesh refresh"),
         ("Ctrl+Z / Ctrl+Y", "undo / redo"),
-        ("R", "generate (Single: one creature, Multiple: a new batch)"),
+        ("R", "generate a new creature"),
         ("Right-click + drag", "orbit camera"),
         ("Scroll wheel", "zoom"),
     };
-
-    private GenerationMode mode = GenerationMode.Single;
-    private CreatureBatchGenerator batchGenerator;
 
     private Label statusLabel;
     private Label creatureNameDisplay;
     private IntegerField seedField;
     private TextField nameField;
-    private IntegerField batchCountField;
     private VisualElement errorToastContainer;
-    private VisualElement singleModeSection;
-    private VisualElement multipleModeSection;
-    private Button singleModeButton;
-    private Button multipleModeButton;
+
+    private bool overGeneratorPanel;
+    private bool overShortcutsPanel;
 
     void OnEnable()
     {
@@ -91,22 +107,28 @@ public class CreatureGeneratorUI : MonoBehaviour
 
         VisualElement root = document.rootVisualElement;
         root.Clear();
+        root.style.unityFontStyleAndWeight = FontStyle.Normal;
         root.Add(BuildGeneratorPanel());
         root.Add(BuildKeybindingsPanel());
         root.Add(BuildNameDisplay());
-        root.Add(BuildModeSelector());
+        root.Add(BuildShowModeBar());
         root.Add(BuildErrorToastContainer());
 
         Application.logMessageReceived += HandleLogMessage;
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Stop the browser page/canvas from also scrolling when the wheel is
+        // used over the Unity view.
+        WebFileBridge.PreventCanvasScroll();
+#endif
 
         if (needsInitialGeneration)
         {
             // Default startup creature: fixed and reproducible rather than
             // blank or randomly seeded. Only overrides the seed for this one
             // generation -- randomizeSeedOnGenerate is restored right after,
-            // so every later Generate() (R key, button, batch) still
-            // randomizes normally instead of getting stuck reproducing this
-            // same creature forever.
+            // so every later Generate() still randomizes normally instead of
+            // getting stuck reproducing this same creature forever.
             bool randomizeAfterwards = target.randomizeSeedOnGenerate;
             target.randomizeSeedOnGenerate = false;
             target.seed = 2075170032;
@@ -118,6 +140,9 @@ public class CreatureGeneratorUI : MonoBehaviour
     void OnDisable()
     {
         Application.logMessageReceived -= HandleLogMessage;
+        overGeneratorPanel = false;
+        overShortcutsPanel = false;
+        PointerOverPanel = false;
     }
 
     void Update()
@@ -125,6 +150,26 @@ public class CreatureGeneratorUI : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.R) && !IsTextInputFocused())
         {
             GenerateCreature();
+        }
+
+        // Keep the top-right bar in sync with state changed in code (ClearSkeleton
+        // resets showMode; editNodes can toggle off on its own).
+        if (target != null && showModeButtons.Count > 0)
+        {
+            BMesh bmesh = target.GetComponent<BMesh>();
+            if (bmesh != null && bmesh.showMode != shownShowMode)
+            {
+                SetShowMode(bmesh.showMode);
+            }
+        }
+        NodeEditController nec = GetMainCameraComponent<NodeEditController>();
+        if (nec != null && editButton != null)
+        {
+            bool editOn = nec.editNodes;
+            if ((editButton.resolvedStyle.backgroundColor.a > 0.5f) != editOn)
+            {
+                RefreshEditButton(editOn);
+            }
         }
     }
 
@@ -146,19 +191,36 @@ public class CreatureGeneratorUI : MonoBehaviour
 
     private VisualElement BuildGeneratorPanel()
     {
-        Foldout foldout = new Foldout { text = "Creature Generator", value = true };
+        Foldout foldout = new Foldout { text = "CREATURE GENERATOR", value = true };
         StylePanel(foldout, top: 16, left: 16);
+        foldout.RegisterCallback<PointerEnterEvent>(_ => { overGeneratorPanel = true; RefreshPointerOverPanel(); });
+        foldout.RegisterCallback<PointerLeaveEvent>(_ => { overGeneratorPanel = false; RefreshPointerOverPanel(); });
 
-        // The panel's own content (all the sections below) can get taller than
-        // the viewport -- especially the Shape/Size/Branching tuning foldouts
-        // expanded together, or a short WebGL canvas -- so it scrolls inside a
-        // capped-height ScrollView instead of the Foldout just growing off the
-        // bottom of the screen. The Foldout's own header stays outside the
-        // ScrollView, so it's always visible even while scrolled.
+        // DNA glyph left of the title.
+        Label headerLbl = foldout.Q<Toggle>(className: "unity-foldout__toggle")?.Q<Label>();
+        if (headerLbl != null && headerLbl.parent != null)
+        {
+            VisualElement dna = SvgIcon.Create(SvgIcon.Dna, Accent, 17f);
+            dna.style.marginRight = 8;
+            dna.style.marginLeft = 2;
+            headerLbl.parent.Insert(headerLbl.parent.IndexOf(headerLbl), dna);
+        }
+
+        // The panel's own content can get taller than the viewport -- especially
+        // the Shape/Size/Branching tuning foldouts expanded together, or a short
+        // WebGL canvas -- so it scrolls inside a capped-height ScrollView instead
+        // of the Foldout just growing off the bottom of the screen. The Foldout's
+        // own header stays outside the ScrollView, so it's always visible.
         ScrollView scrollView = CreatePanelScrollView();
         foldout.Add(scrollView);
 
-        // ------ Customization shared by Single and Multiple ------
+        Label subtitle = new Label("Design procedural creatures");
+        subtitle.style.color = TextMuted;
+        subtitle.style.fontSize = 11;
+        subtitle.style.marginBottom = 8;
+        scrollView.Add(subtitle);
+
+        // ------ Customization ------
 
         SliderInt complexitySlider = new SliderInt("Complexity", 1, 4) { value = target.complexity };
         complexitySlider.RegisterValueChangedCallback(evt => target.complexity = evt.newValue);
@@ -166,14 +228,16 @@ public class CreatureGeneratorUI : MonoBehaviour
         scrollView.Add(complexitySlider);
 
         Toggle eyesToggle = new Toggle("Add Eyes") { value = target.addEyes };
-        eyesToggle.RegisterValueChangedCallback(evt => target.addEyes = evt.newValue);
+        eyesToggle.RegisterValueChangedCallback(evt =>
+        {
+            target.addEyes = evt.newValue;
+            target.SetEyesVisible(evt.newValue); // hide/show the eyes already on this creature
+        });
         Style(eyesToggle);
         scrollView.Add(eyesToggle);
 
         // Skin is always applied by Generate(); this picks whether/how the
         // skeleton is animated on top of it (see CreatureIdleSway).
-        // ApplyAnimationMode() no-ops if there's no body yet (e.g. right after
-        // switching to Multiple mode), so this is safe to call unconditionally.
         EnumField animationModeField = new EnumField("Animation", target.animationMode);
         animationModeField.RegisterValueChangedCallback(evt =>
         {
@@ -183,18 +247,38 @@ public class CreatureGeneratorUI : MonoBehaviour
         Style(animationModeField);
         scrollView.Add(animationModeField);
 
-        // ------ Single-mode-only controls ------
+        nameField = new TextField("Name") { value = target.creatureName };
+        nameField.RegisterValueChangedCallback(evt =>
+        {
+            target.creatureName = evt.newValue;
+            if (creatureNameDisplay != null)
+            {
+                creatureNameDisplay.text = evt.newValue;
+            }
+        });
+        Style(nameField);
+        scrollView.Add(nameField);
 
-        singleModeSection = new VisualElement();
-        scrollView.Add(singleModeSection);
-        BuildSingleModeSection(singleModeSection);
+        // (Show Mode lives in the top-right icon bar -- see BuildShowModeBar.)
 
-        // ------ Multiple-mode-only controls ------
+        Toggle randomSeedToggle = new Toggle("Random Seed") { value = target.randomizeSeedOnGenerate };
+        Style(randomSeedToggle);
+        scrollView.Add(randomSeedToggle);
 
-        multipleModeSection = new VisualElement();
-        multipleModeSection.style.display = DisplayStyle.None;
-        scrollView.Add(multipleModeSection);
-        BuildMultipleModeSection(multipleModeSection);
+        seedField = new IntegerField("Seed") { value = target.seed };
+        seedField.SetEnabled(!target.randomizeSeedOnGenerate);
+        seedField.RegisterValueChangedCallback(evt => target.seed = evt.newValue);
+        Style(seedField);
+        seedField.style.minWidth = 170; // the label + a full Ticks-based seed otherwise gets clipped
+        scrollView.Add(seedField);
+
+        randomSeedToggle.RegisterValueChangedCallback(evt =>
+        {
+            target.randomizeSeedOnGenerate = evt.newValue;
+            seedField.SetEnabled(!evt.newValue);
+        });
+
+        // (Edit Nodes lives in the top-right icon bar -- see BuildShowModeBar.)
 
         // ------ Generation bias tuning ------
 
@@ -208,118 +292,230 @@ public class CreatureGeneratorUI : MonoBehaviour
         StyleButton(generateButton);
         scrollView.Add(generateButton);
 
+        scrollView.Add(BuildExportGroup());
+
         Button clearButton = new Button(ClearCreature) { text = "Clear" };
-        StyleButton(clearButton, destructive: true);
+        StyleButton(clearButton, ButtonKind.Destructive);
         scrollView.Add(clearButton);
 
         statusLabel = new Label(string.Empty);
-        statusLabel.style.color = Color.white;
-        statusLabel.style.marginTop = 6;
+        statusLabel.style.color = TextMuted;
+        statusLabel.style.fontSize = 11;
+        statusLabel.style.marginTop = 8;
         statusLabel.style.whiteSpace = WhiteSpace.Normal;
         scrollView.Add(statusLabel);
 
         return foldout;
     }
 
-    private void BuildSingleModeSection(VisualElement section)
+    // Save / load a creature, kept together just above Clear and in green so
+    // they read as "the way stuff leaves / enters" rather than another edit.
+    private VisualElement BuildExportGroup()
     {
-        nameField = new TextField("Name") { value = target.creatureName };
-        nameField.RegisterValueChangedCallback(evt =>
-        {
-            target.creatureName = evt.newValue;
-            if (creatureNameDisplay != null)
-            {
-                creatureNameDisplay.text = evt.newValue;
-            }
-        });
-        Style(nameField);
-        section.Add(nameField);
+        VisualElement group = new VisualElement();
+        group.style.marginTop = 6;
 
-        // Mirrors BMesh's own Inspector show mode. Not guarded against picking
-        // "Mesh" while a skeleton exists -- AddSkeleton() forces Gizmo mode
-        // specifically to avoid double-rendering the static mesh alongside the
-        // SkinnedMeshRenderer, so switching back to Mesh here can bring the
-        // static mesh back too. Kept simple/unguarded on purpose.
-        BMesh bmesh = target.GetComponent<BMesh>();
-        EnumField showModeField = new EnumField("Show Mode", bmesh.showMode);
-        showModeField.RegisterValueChangedCallback(evt => bmesh.showMode = (BMesh.ShowMode)evt.newValue);
-        Style(showModeField);
-        section.Add(showModeField);
+        VisualElement row = new VisualElement();
+        row.style.flexDirection = FlexDirection.Row;
 
-        Toggle randomSeedToggle = new Toggle("Random Seed") { value = target.randomizeSeedOnGenerate };
-        Style(randomSeedToggle);
-        section.Add(randomSeedToggle);
+        Button exportGltfButton = IconButton(SvgIcon.DownloadSimple, "Export (glb)", ButtonKind.Positive, ExportCreatureGltf);
+        exportGltfButton.style.flexGrow = 1;
+        exportGltfButton.style.flexBasis = 0f;
+        exportGltfButton.style.flexShrink = 1;
+        exportGltfButton.style.minWidth = 0;
+        exportGltfButton.style.marginRight = 4;
+        row.Add(exportGltfButton);
 
-        seedField = new IntegerField("Seed") { value = target.seed };
-        seedField.SetEnabled(!target.randomizeSeedOnGenerate);
-        seedField.RegisterValueChangedCallback(evt => target.seed = evt.newValue);
-        Style(seedField);
-        seedField.style.minWidth = 170; // the label + a full Ticks-based seed otherwise gets clipped
-        section.Add(seedField);
-
-        randomSeedToggle.RegisterValueChangedCallback(evt =>
-        {
-            target.randomizeSeedOnGenerate = evt.newValue;
-            seedField.SetEnabled(!evt.newValue);
-        });
-
-        // Lives on NodeEditController (the camera), not on this CreatureGenerator --
-        // EnsureCameraTools() (called in OnEnable, before this) guarantees it's
-        // there whenever Camera.main exists.
-        NodeEditController nodeEditController = GetMainCameraComponent<NodeEditController>();
-        if (nodeEditController != null)
-        {
-            Toggle liveEditToggle = new Toggle("Live Node Editing") { value = nodeEditController.liveEditing };
-            liveEditToggle.RegisterValueChangedCallback(evt => nodeEditController.liveEditing = evt.newValue);
-            Style(liveEditToggle);
-            section.Add(liveEditToggle);
-
-            Toggle showNodesToggle = new Toggle("Show Nodes") { value = nodeEditController.showNodes };
-            showNodesToggle.RegisterValueChangedCallback(evt => nodeEditController.showNodes = evt.newValue);
-            Style(showNodesToggle);
-            section.Add(showNodesToggle);
-        }
-
-        VisualElement exportRow = new VisualElement();
-        exportRow.style.flexDirection = FlexDirection.Row;
-        exportRow.style.marginTop = 6;
-
-        Button exportObjButton = new Button(ExportCreatureObj) { text = "Mesh (OBJ)" };
-        StyleButton(exportObjButton);
-        exportObjButton.style.flexGrow = 1;
-        exportObjButton.style.marginTop = 0;
-        exportObjButton.style.marginRight = 4;
-        exportRow.Add(exportObjButton);
-
-        Button exportJsonButton = new Button(ExportCreatureJson) { text = "Creature (JSON)" };
-        StyleButton(exportJsonButton);
+        Button exportJsonButton = IconButton(SvgIcon.DownloadSimple, "Export (json)", ButtonKind.Positive, ExportCreatureJson);
         exportJsonButton.style.flexGrow = 1;
-        exportJsonButton.style.marginTop = 0;
-        exportRow.Add(exportJsonButton);
+        exportJsonButton.style.flexBasis = 0f;
+        exportJsonButton.style.flexShrink = 1;
+        exportJsonButton.style.minWidth = 0;
+        row.Add(exportJsonButton);
 
-        section.Add(exportRow);
+        group.Add(row);
 
-        Button importButton = new Button(ImportCreature) { text = "Import Creature" };
-        StyleButton(importButton);
-        section.Add(importButton);
+        Button importButton = IconButton(SvgIcon.UploadSimple, "Import Creature", ButtonKind.Positive, ImportCreature);
+        group.Add(importButton);
 
-        Button mutateButton = new Button(MutateCreature) { text = "Mutate a Limb" };
-        StyleButton(mutateButton);
-        section.Add(mutateButton);
+        return group;
     }
 
-    private void BuildMultipleModeSection(VisualElement section)
+    // A Button laid out as [icon] [label] rather than a plain text button.
+    private Button IconButton(string iconPath, string text, ButtonKind kind, System.Action onClick)
     {
-        batchCountField = new IntegerField("Count") { value = batchGenerator != null ? batchGenerator.count : 6 };
-        Style(batchCountField);
-        section.Add(batchCountField);
+        Button button = new Button(onClick);
+        StyleButton(button, kind);
+        button.style.flexDirection = FlexDirection.Row;
+        button.style.alignItems = Align.Center;
+        button.style.justifyContent = Justify.Center;
 
-        Label hint = new Label("Complexity/Add Eyes/Animation above apply to every creature in the batch.");
-        hint.style.color = new Color(0.8f, 0.8f, 0.8f);
-        hint.style.fontSize = 11;
-        hint.style.whiteSpace = WhiteSpace.Normal;
-        hint.style.marginTop = 4;
-        section.Add(hint);
+        VisualElement icon = SvgIcon.Create(iconPath, Color.white, 14f);
+        icon.style.marginRight = 6;
+        button.Add(icon);
+
+        Label label = new Label(text);
+        label.style.color = Color.white;
+        label.style.unityFontStyleAndWeight = FontStyle.Bold;
+        label.style.fontSize = 12;
+        label.style.whiteSpace = WhiteSpace.NoWrap;
+        label.style.overflow = Overflow.Hidden;
+        label.pickingMode = PickingMode.Ignore;
+        button.Add(label);
+
+        return button;
+    }
+
+    // Top-right icon bar: the mutually-exclusive preview modes (Mesh / Wireframe
+    // / Gizmo) plus an independent "Edit" toggle for node editing. Icons come
+    // from Assets/UI/Textures (embedded in SvgIcon).
+    private VisualElement BuildShowModeBar()
+    {
+        showModeButtons.Clear();
+
+        VisualElement container = new VisualElement();
+        container.style.position = Position.Absolute;
+        container.style.top = 16;
+        container.style.right = 16;
+        container.style.flexDirection = FlexDirection.Row;
+        container.style.alignItems = Align.Center;
+        container.style.backgroundColor = PanelBg;
+        container.style.paddingLeft = 4;
+        container.style.paddingRight = 4;
+        container.style.paddingTop = 4;
+        container.style.paddingBottom = 4;
+        SetBorderRadius(container, 12);
+        SetBorder(container, PanelBorder, 1f);
+        container.RegisterCallback<PointerEnterEvent>(_ => { overGeneratorPanel = true; RefreshPointerOverPanel(); });
+        container.RegisterCallback<PointerLeaveEvent>(_ => { overGeneratorPanel = false; RefreshPointerOverPanel(); });
+
+        (BMesh.ShowMode mode, string icon, string tip)[] modes =
+        {
+            (BMesh.ShowMode.Mesh, SvgIcon.Cube, "Mesh"),
+            (BMesh.ShowMode.Wireframe, SvgIcon.CubeTransparent, "Wireframe"),
+            (BMesh.ShowMode.Gizmo, SvgIcon.Aperture, "Structure"),
+        };
+
+        foreach ((BMesh.ShowMode mode, string iconPath, string tip) in modes)
+        {
+            BMesh.ShowMode captured = mode;
+            Button b = MakeBarButton(iconPath, tip, () => SetShowMode(captured));
+            showModeButtons[mode] = b;
+            container.Add(b);
+        }
+
+        // divider
+        VisualElement divider = new VisualElement();
+        divider.style.width = 1;
+        divider.style.height = 20;
+        divider.style.marginLeft = 4;
+        divider.style.marginRight = 4;
+        divider.style.backgroundColor = PanelBorder;
+        container.Add(divider);
+
+        editButton = MakeBarButton(SvgIcon.CubeFocus, "Edit nodes", () =>
+        {
+            NodeEditController nec = GetMainCameraComponent<NodeEditController>();
+            if (nec != null)
+            {
+                nec.editNodes = !nec.editNodes;
+                RefreshEditButton(nec.editNodes);
+            }
+        });
+        container.Add(editButton);
+
+        BMesh initial = target != null ? target.GetComponent<BMesh>() : null;
+        RefreshShowModeBar(initial != null ? initial.showMode : BMesh.ShowMode.Mesh);
+        NodeEditController controller = GetMainCameraComponent<NodeEditController>();
+        RefreshEditButton(controller != null && controller.editNodes);
+
+        return container;
+    }
+
+    private Button MakeBarButton(string iconPath, string tip, System.Action onClick)
+    {
+        Button b = new Button(onClick) { tooltip = tip };
+        b.style.width = 34;
+        b.style.height = 34;
+        b.style.marginLeft = 2;
+        b.style.marginRight = 2;
+        b.style.marginTop = 0;
+        b.style.marginBottom = 0;
+        b.style.paddingLeft = 0;
+        b.style.paddingRight = 0;
+        b.style.paddingTop = 0;
+        b.style.paddingBottom = 0;
+        b.style.backgroundColor = Color.clear;
+        b.style.alignItems = Align.Center;
+        b.style.justifyContent = Justify.Center;
+        SetBorderRadius(b, 8);
+        SetBorder(b, Color.clear, 0f);
+
+        VisualElement icon = SvgIcon.Create(iconPath, TextMuted, 18f);
+        b.Add(icon);
+        b.userData = icon;
+
+        // Subtle hover only while inactive (an active button is already purple).
+        b.RegisterCallback<PointerEnterEvent>(_ =>
+        {
+            if (b.resolvedStyle.backgroundColor.a < 0.05f)
+            {
+                b.style.backgroundColor = new Color(1f, 1f, 1f, 0.07f);
+            }
+        });
+        b.RegisterCallback<PointerLeaveEvent>(_ =>
+        {
+            if (b.resolvedStyle.backgroundColor.a < 0.12f)
+            {
+                b.style.backgroundColor = Color.clear;
+            }
+        });
+        return b;
+    }
+
+    private void SetShowMode(BMesh.ShowMode mode)
+    {
+        BMesh bmesh = target != null ? target.GetComponent<BMesh>() : null;
+        if (bmesh != null)
+        {
+            bmesh.showMode = mode;
+        }
+
+        // The "Structure" (Gizmo) view hides the mesh and shows node markers.
+        NodeEditController nec = GetMainCameraComponent<NodeEditController>();
+        if (nec != null)
+        {
+            nec.showNodes = mode == BMesh.ShowMode.Gizmo;
+        }
+
+        RefreshShowModeBar(mode);
+    }
+
+    private void RefreshShowModeBar(BMesh.ShowMode active)
+    {
+        shownShowMode = active;
+        foreach (KeyValuePair<BMesh.ShowMode, VisualElement> kv in showModeButtons)
+        {
+            bool on = kv.Key == active;
+            kv.Value.style.backgroundColor = on ? Accent : Color.clear;
+            if (kv.Value.userData is VisualElement icon)
+            {
+                SvgIcon.Recolor(icon, on ? Color.white : TextMuted);
+            }
+        }
+    }
+
+    private void RefreshEditButton(bool on)
+    {
+        if (editButton == null)
+        {
+            return;
+        }
+        editButton.style.backgroundColor = on ? Accent : Color.clear;
+        if (editButton.userData is VisualElement icon)
+        {
+            SvgIcon.Recolor(icon, on ? Color.white : TextMuted);
+        }
     }
 
     // ------ Generation bias tuning sections ------
@@ -383,8 +579,10 @@ public class CreatureGeneratorUI : MonoBehaviour
 
     private VisualElement BuildKeybindingsPanel()
     {
-        Foldout foldout = new Foldout { text = "Shortcuts", value = false };
+        Foldout foldout = new Foldout { text = "SHORTCUTS", value = false };
         StylePanel(foldout, bottom: 16, right: 16);
+        foldout.RegisterCallback<PointerEnterEvent>(_ => { overShortcutsPanel = true; RefreshPointerOverPanel(); });
+        foldout.RegisterCallback<PointerLeaveEvent>(_ => { overShortcutsPanel = false; RefreshPointerOverPanel(); });
 
         ScrollView scrollView = CreatePanelScrollView();
         foldout.Add(scrollView);
@@ -396,7 +594,7 @@ public class CreatureGeneratorUI : MonoBehaviour
             row.style.marginTop = 2;
 
             Label keyLabel = new Label(key);
-            keyLabel.style.color = new Color(1f, 0.82f, 0.3f);
+            keyLabel.style.color = Accent;
             keyLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             keyLabel.style.fontSize = 11;
             keyLabel.style.minWidth = 120;
@@ -404,7 +602,7 @@ public class CreatureGeneratorUI : MonoBehaviour
             row.Add(keyLabel);
 
             Label descriptionLabel = new Label(description);
-            descriptionLabel.style.color = new Color(0.8f, 0.8f, 0.8f);
+            descriptionLabel.style.color = TextMuted;
             descriptionLabel.style.fontSize = 11;
             descriptionLabel.style.whiteSpace = WhiteSpace.Normal;
             descriptionLabel.style.flexShrink = 1;
@@ -423,123 +621,42 @@ public class CreatureGeneratorUI : MonoBehaviour
         container.style.top = 16;
         container.style.left = 0;
         container.style.right = 0;
-        container.style.flexDirection = FlexDirection.Row;
-        container.style.justifyContent = Justify.Center;
-        container.pickingMode = PickingMode.Ignore;
-
-        creatureNameDisplay = new Label(target != null ? target.creatureName : string.Empty);
-        creatureNameDisplay.style.color = Color.white;
-        creatureNameDisplay.style.fontSize = 22;
-        creatureNameDisplay.style.unityFontStyleAndWeight = FontStyle.Bold;
-        creatureNameDisplay.style.backgroundColor = new Color(0f, 0f, 0f, 0.45f);
-        creatureNameDisplay.style.paddingLeft = 18;
-        creatureNameDisplay.style.paddingRight = 18;
-        creatureNameDisplay.style.paddingTop = 4;
-        creatureNameDisplay.style.paddingBottom = 4;
-        SetBorderRadius(creatureNameDisplay, 14);
-
-        container.Add(creatureNameDisplay);
-        return container;
-    }
-
-    // Bottom-center Single/Multiple switch -- a distinct display mode rather
-    // than just another button: Single shows/edits one creature the way this
-    // panel always has, Multiple generates a whole grid of independent
-    // creatures at once (see CreatureBatchGenerator) with a simplified panel
-    // (no Name/Seed/Export -- none of those make sense for a batch).
-    private VisualElement BuildModeSelector()
-    {
-        VisualElement container = new VisualElement();
-        container.style.position = Position.Absolute;
-        container.style.bottom = 16;
-        container.style.left = 0;
-        container.style.right = 0;
-        container.style.flexDirection = FlexDirection.Row;
-        container.style.justifyContent = Justify.Center;
+        container.style.alignItems = Align.Center;
         container.pickingMode = PickingMode.Ignore;
 
         VisualElement pill = new VisualElement();
-        pill.style.flexDirection = FlexDirection.Row;
-        pill.style.backgroundColor = new Color(0f, 0f, 0f, 0.6f);
-        pill.style.paddingLeft = 4;
-        pill.style.paddingRight = 4;
-        pill.style.paddingTop = 4;
-        pill.style.paddingBottom = 4;
-        SetBorderRadius(pill, 8);
+        pill.style.alignItems = Align.Center;
+        pill.style.backgroundColor = PanelBg;
+        pill.style.paddingLeft = 28;
+        pill.style.paddingRight = 28;
+        pill.style.paddingTop = 7;
+        pill.style.paddingBottom = 8;
+        SetBorderRadius(pill, 14);
+        SetBorder(pill, PanelBorder, 1f);
 
-        singleModeButton = new Button(() => SetMode(GenerationMode.Single)) { text = "Single" };
-        multipleModeButton = new Button(() => SetMode(GenerationMode.Multiple)) { text = "Multiple" };
-        StyleButton(singleModeButton);
-        StyleButton(multipleModeButton);
-        singleModeButton.style.marginTop = 0;
-        multipleModeButton.style.marginTop = 0;
-        singleModeButton.style.marginRight = 4;
-        singleModeButton.style.minWidth = 90;
-        multipleModeButton.style.minWidth = 90;
+        creatureNameDisplay = new Label(target != null ? target.creatureName : string.Empty);
+        creatureNameDisplay.style.color = TextPrimary;
+        creatureNameDisplay.style.fontSize = 20;
+        creatureNameDisplay.style.unityFontStyleAndWeight = FontStyle.Bold;
+        pill.Add(creatureNameDisplay);
 
-        pill.Add(singleModeButton);
-        pill.Add(multipleModeButton);
         container.Add(pill);
-
-        RefreshModeButtons();
         return container;
     }
 
-    private void SetMode(GenerationMode newMode)
+    // Mirrors the two per-panel hover flags into the static OrbitCamera reads.
+    private void RefreshPointerOverPanel()
     {
-        if (mode == newMode)
-        {
-            return;
-        }
-
-        mode = newMode;
-        RefreshModeButtons();
-
-        if (mode == GenerationMode.Multiple)
-        {
-            if (target != null)
-            {
-                target.Clear();
-            }
-        }
-        else
-        {
-            batchGenerator?.ClearBatch();
-        }
-
-        if (singleModeSection != null)
-        {
-            singleModeSection.style.display = mode == GenerationMode.Single ? DisplayStyle.Flex : DisplayStyle.None;
-        }
-        if (multipleModeSection != null)
-        {
-            multipleModeSection.style.display = mode == GenerationMode.Multiple ? DisplayStyle.Flex : DisplayStyle.None;
-        }
-
-        statusLabel.text = mode == GenerationMode.Single ? "Switched to Single mode." : "Switched to Multiple mode.";
-    }
-
-    private void RefreshModeButtons()
-    {
-        Color active = new Color(0.25f, 0.45f, 0.85f);
-        Color inactive = new Color(0.25f, 0.25f, 0.25f);
-        if (singleModeButton != null)
-        {
-            singleModeButton.style.backgroundColor = mode == GenerationMode.Single ? active : inactive;
-        }
-        if (multipleModeButton != null)
-        {
-            multipleModeButton.style.backgroundColor = mode == GenerationMode.Multiple ? active : inactive;
-        }
+        PointerOverPanel = overGeneratorPanel || overShortcutsPanel;
     }
 
     private VisualElement BuildErrorToastContainer()
     {
         errorToastContainer = new VisualElement();
         errorToastContainer.style.position = Position.Absolute;
-        errorToastContainer.style.top = 16;
+        errorToastContainer.style.top = 64; // below the show-mode bar
         errorToastContainer.style.right = 16;
-        errorToastContainer.style.width = 320;
+        errorToastContainer.style.width = 300;
         errorToastContainer.style.flexDirection = FlexDirection.Column;
         errorToastContainer.pickingMode = PickingMode.Ignore;
         return errorToastContainer;
@@ -547,22 +664,45 @@ public class CreatureGeneratorUI : MonoBehaviour
 
     private void HandleLogMessage(string message, string stackTrace, LogType type)
     {
-        if (type != LogType.Error && type != LogType.Exception && type != LogType.Warning)
+        if (type == LogType.Warning)
+        {
+            ShowToast(message, ToastKind.Warning);
+        }
+        else if (type == LogType.Error || type == LogType.Exception)
+        {
+            ShowToast(message, ToastKind.Error);
+        }
+    }
+
+    // The one place a transient message reaches the user -- errors/warnings from
+    // the Unity log stream (see HandleLogMessage) and export/import results.
+    public void ShowToast(string message, ToastKind kind = ToastKind.Info)
+    {
+        if (errorToastContainer == null || string.IsNullOrEmpty(message))
         {
             return;
         }
 
+        Color bg = kind switch
+        {
+            ToastKind.Success => new Color(0.14f, 0.44f, 0.28f, 0.96f),
+            ToastKind.Warning => new Color(0.5f, 0.42f, 0.08f, 0.96f),
+            ToastKind.Error => new Color(0.56f, 0.15f, 0.17f, 0.96f),
+            _ => new Color(0.13f, 0.13f, 0.16f, 0.96f),
+        };
+
         Label toast = new Label(message);
         toast.style.color = Color.white;
-        toast.style.backgroundColor = type == LogType.Warning ? new Color(0.55f, 0.45f, 0f, 0.9f) : new Color(0.6f, 0.1f, 0.1f, 0.9f);
+        toast.style.backgroundColor = bg;
         toast.style.whiteSpace = WhiteSpace.Normal;
         toast.style.fontSize = 11;
-        toast.style.marginBottom = 4;
-        toast.style.paddingLeft = 8;
-        toast.style.paddingRight = 8;
-        toast.style.paddingTop = 6;
-        toast.style.paddingBottom = 6;
-        SetBorderRadius(toast, 4);
+        toast.style.marginBottom = 6;
+        toast.style.paddingLeft = 12;
+        toast.style.paddingRight = 12;
+        toast.style.paddingTop = 9;
+        toast.style.paddingBottom = 9;
+        SetBorderRadius(toast, 10);
+        SetBorder(toast, new Color(1f, 1f, 1f, 0.1f), 1f);
 
         errorToastContainer.Add(toast);
         StartCoroutine(RemoveToastAfterDelay(toast));
@@ -582,6 +722,18 @@ public class CreatureGeneratorUI : MonoBehaviour
         element.style.borderBottomRightRadius = radius;
     }
 
+    private static void SetBorder(VisualElement element, Color color, float width)
+    {
+        element.style.borderTopColor = color;
+        element.style.borderBottomColor = color;
+        element.style.borderLeftColor = color;
+        element.style.borderRightColor = color;
+        element.style.borderTopWidth = width;
+        element.style.borderBottomWidth = width;
+        element.style.borderLeftWidth = width;
+        element.style.borderRightWidth = width;
+    }
+
     private static void StylePanel(VisualElement element, float? top = null, float? left = null, float? bottom = null, float? right = null)
     {
         element.style.position = Position.Absolute;
@@ -590,15 +742,16 @@ public class CreatureGeneratorUI : MonoBehaviour
         if (bottom.HasValue) element.style.bottom = bottom.Value;
         if (right.HasValue) element.style.right = right.Value;
         element.style.width = 320;
-        element.style.paddingLeft = 8;
-        element.style.paddingRight = 10;
-        element.style.paddingTop = 8;
-        element.style.paddingBottom = 12;
-        element.style.backgroundColor = new Color(0f, 0f, 0f, 0.6f);
-        SetBorderRadius(element, 6);
+        element.style.paddingLeft = 14;
+        element.style.paddingRight = 14;
+        element.style.paddingTop = 12;
+        element.style.paddingBottom = 14;
+        element.style.backgroundColor = PanelBg;
+        SetBorderRadius(element, 16);
+        SetBorder(element, PanelBorder, 1f);
         // `color` is inherited in USS, so this also covers the Foldout's own
         // header label plus every control added inside it.
-        element.style.color = Color.white;
+        element.style.color = TextPrimary;
 
         // Cap the panel to a share of the screen instead of letting it grow
         // past the bottom -- both the generator panel (every tuning foldout
@@ -636,6 +789,18 @@ public class CreatureGeneratorUI : MonoBehaviour
         if (header != null)
         {
             header.style.flexShrink = 0;
+            Label headerLabel = header.Q<Label>();
+            if (headerLabel != null)
+            {
+                headerLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                headerLabel.style.fontSize = 14;
+                headerLabel.style.color = TextPrimary;
+            }
+            VisualElement chevron = header.Q(className: "unity-foldout__checkmark");
+            if (chevron != null)
+            {
+                chevron.style.unityBackgroundImageTintColor = Accent;
+            }
         }
     }
 
@@ -647,6 +812,11 @@ public class CreatureGeneratorUI : MonoBehaviour
         ScrollView scrollView = new ScrollView(ScrollViewMode.Vertical);
         scrollView.style.flexGrow = 1;
         scrollView.style.minHeight = 0;
+        // Never a horizontal scrollbar -- content that's a couple of px too wide
+        // just gets clipped by the panel's overflow:hidden.
+        scrollView.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+        scrollView.mode = ScrollViewMode.Vertical;
+        scrollView.contentContainer.style.maxWidth = Length.Percent(100);
 
         // The default runtime scroller is a wide track with chunky up/down
         // step buttons -- slim it down to a plain thin thumb, more in
@@ -654,17 +824,35 @@ public class CreatureGeneratorUI : MonoBehaviour
         VisualElement verticalScroller = scrollView.Q(className: "unity-scroller--vertical");
         if (verticalScroller != null)
         {
-            verticalScroller.style.width = 8;
+            verticalScroller.style.width = 9;
             verticalScroller.style.marginLeft = 2;
+            verticalScroller.style.backgroundColor = Color.clear;
 
             verticalScroller.Q(className: "unity-scroller__low-button")?.RemoveFromHierarchy();
             verticalScroller.Q(className: "unity-scroller__high-button")?.RemoveFromHierarchy();
 
+            // The track behind the thumb: barely-there so the thumb reads.
+            foreach (string trackClass in new[] { "unity-scroller__slider", "unity-base-slider--vertical", "unity-base-slider__tracker" })
+            {
+                VisualElement track = verticalScroller.Q(className: trackClass);
+                if (track != null)
+                {
+                    track.style.backgroundColor = new Color(1f, 1f, 1f, 0.05f);
+                    SetBorder(track, Color.clear, 0f);
+                    track.style.marginLeft = 0;
+                    track.style.marginRight = 0;
+                }
+            }
+
+            // The thumb: purple, clearly on top of the dark panel + faint track.
             VisualElement dragger = verticalScroller.Q(className: "unity-base-slider__dragger");
             if (dragger != null)
             {
-                dragger.style.backgroundColor = new Color(1f, 1f, 1f, 0.35f);
+                dragger.style.backgroundColor = Accent;
+                SetBorder(dragger, Color.clear, 0f);
                 SetBorderRadius(dragger, 4);
+                dragger.style.marginLeft = 0;
+                dragger.style.marginRight = 0;
             }
         }
 
@@ -680,10 +868,10 @@ public class CreatureGeneratorUI : MonoBehaviour
     // controls that already inherited it correctly, and harmless otherwise.
     private static void Style(VisualElement element)
     {
-        element.style.marginTop = 4;
+        element.style.marginTop = 7;
         element.style.fontSize = 12;
-        element.style.color = Color.white;
-        element.Query<VisualElement>().ForEach(descendant => descendant.style.color = Color.white);
+        element.style.color = TextPrimary;
+        element.Query<VisualElement>().ForEach(descendant => descendant.style.color = TextPrimary);
 
         // A fixed, narrower label leaves more of the panel's width for the
         // value/dropdown itself, which is what was getting clipped.
@@ -700,18 +888,14 @@ public class CreatureGeneratorUI : MonoBehaviour
         };
         if (label != null)
         {
-            label.style.width = 80;
+            label.style.width = 90;
             label.style.fontSize = 12;
+            label.style.color = TextMuted;
             label.style.overflow = Overflow.Visible;
             label.style.textOverflow = TextOverflow.Clip;
         }
 
-        // TextField/IntegerField's own internal input box renders with a
-        // light background by default (unlike Toggle/EnumField's chrome) --
-        // forcing text white without addressing that left "Name" literally
-        // white-on-white. Give just that inner box an explicit dark,
-        // translucent background so white text has contrast regardless of the
-        // control's own default chrome.
+        // Dark rounded input box for text / integer fields.
         if (element is TextField || element is IntegerField)
         {
             VisualElement input = element.Q(className: "unity-base-text-field__input")
@@ -719,37 +903,130 @@ public class CreatureGeneratorUI : MonoBehaviour
                                 ?? element.Q(className: "unity-integer-field__input");
             if (input != null)
             {
-                input.style.backgroundColor = new Color(1f, 1f, 1f, 0.15f);
-                input.style.color = Color.white;
-                SetBorderRadius(input, 3);
+                input.style.backgroundColor = ControlBg;
+                input.style.color = TextPrimary;
+                SetBorder(input, ControlBorder, 1f);
+                SetBorderRadius(input, 7);
+                input.style.paddingLeft = 6;
+                input.style.paddingRight = 6;
+                input.style.paddingTop = 3;
+                input.style.paddingBottom = 3;
+            }
+        }
+
+        // EnumField dropdown chrome.
+        if (element is EnumField)
+        {
+            VisualElement input = element.Q(className: "unity-enum-field__input") ?? element.Q(className: "unity-base-field__input");
+            if (input != null)
+            {
+                input.style.backgroundColor = ControlBg;
+                SetBorder(input, ControlBorder, 1f);
+                SetBorderRadius(input, 7);
+                input.style.paddingLeft = 6;
+                input.style.paddingRight = 6;
+                input.style.paddingTop = 3;
+                input.style.paddingBottom = 3;
+            }
+        }
+
+        // Purple sliders.
+        if (element is Slider || element is SliderInt || element is MinMaxSlider)
+        {
+            element.Query(className: "unity-base-slider__dragger").ForEach(d =>
+            {
+                d.style.backgroundColor = Accent;
+                SetBorder(d, Color.clear, 0f);
+                SetBorderRadius(d, 7);
+            });
+            element.Query(className: "unity-base-slider__tracker").ForEach(t =>
+            {
+                t.style.backgroundColor = new Color(1f, 1f, 1f, 0.22f);
+                SetBorder(t, Color.clear, 0f);
+                SetBorderRadius(t, 2);
+            });
+        }
+
+        // Nested tuning foldouts (Shape / Size / Branching): purple chevron,
+        // slightly bolder header.
+        if (element is Foldout fold)
+        {
+            Toggle ft = fold.Q<Toggle>(className: "unity-foldout__toggle");
+            if (ft != null)
+            {
+                Label fl = ft.Q<Label>();
+                if (fl != null)
+                {
+                    fl.style.color = TextPrimary;
+                    fl.style.fontSize = 12;
+                    fl.style.unityFontStyleAndWeight = FontStyle.Bold;
+                }
+                VisualElement fc = ft.Q(className: "unity-foldout__checkmark");
+                if (fc != null)
+                {
+                    fc.style.unityBackgroundImageTintColor = Accent;
+                }
+            }
+        }
+
+        // Purple check for toggles (a rounded box, filled when on).
+        if (element is Toggle toggle)
+        {
+            VisualElement checkmark = toggle.Q(className: "unity-toggle__checkmark");
+            if (checkmark != null)
+            {
+                checkmark.style.width = 18;
+                checkmark.style.height = 18;
+                SetBorderRadius(checkmark, 5);
+                SetBorder(checkmark, ControlBorder, 1f);
+                checkmark.style.unityBackgroundImageTintColor = Color.white;
+
+                void Paint(bool on) => checkmark.style.backgroundColor = on ? Accent : ControlBg;
+                Paint(toggle.value);
+                toggle.RegisterValueChangedCallback(e => Paint(e.newValue));
             }
         }
     }
 
-    private static void StyleButton(Button button, bool destructive = false)
+    private static void StyleButton(Button button, ButtonKind kind = ButtonKind.Primary)
     {
-        Style(button);
-        button.style.backgroundColor = destructive ? new Color(0.55f, 0.25f, 0.2f) : new Color(0.25f, 0.45f, 0.85f);
+        button.style.marginTop = 7;
+        button.style.fontSize = 12;
+
+        Color baseColor = kind switch
+        {
+            ButtonKind.Destructive => new Color(0.62f, 0.24f, 0.26f),
+            ButtonKind.Positive => Accent,
+            _ => Accent,
+        };
+        button.userData = baseColor;
+        button.style.backgroundColor = baseColor;
+
         button.style.color = Color.white;
         button.style.unityFontStyleAndWeight = FontStyle.Bold;
-        button.style.paddingTop = 6;
-        button.style.paddingBottom = 6;
-        button.style.marginTop = 6;
-        SetBorderRadius(button, 4);
-        button.style.borderTopWidth = 0;
-        button.style.borderBottomWidth = 0;
-        button.style.borderLeftWidth = 0;
-        button.style.borderRightWidth = 0;
+        button.style.paddingTop = 9;
+        button.style.paddingBottom = 9;
+        SetBorderRadius(button, 10);
+        SetBorder(button, Color.clear, 0f);
+
+        button.RegisterCallback<PointerEnterEvent>(_ =>
+        {
+            if (button.userData is Color c)
+            {
+                button.style.backgroundColor = Color.Lerp(c, Color.white, 0.14f);
+            }
+        });
+        button.RegisterCallback<PointerLeaveEvent>(_ =>
+        {
+            if (button.userData is Color c)
+            {
+                button.style.backgroundColor = c;
+            }
+        });
     }
 
     private void GenerateCreature()
     {
-        if (mode == GenerationMode.Multiple)
-        {
-            GenerateBatch();
-            return;
-        }
-
         if (target == null)
         {
             target = CreateCreature();
@@ -768,23 +1045,8 @@ public class CreatureGeneratorUI : MonoBehaviour
         FrameCamera(bounds.center, bounds.extents.magnitude, target.transform);
     }
 
-    private void GenerateBatch()
-    {
-        CreatureBatchGenerator batch = EnsureBatchGenerator();
-        if (batchCountField != null)
-        {
-            batch.count = batchCountField.value;
-        }
-
-        // Complexity/Add Eyes/Animation are shared settings, read straight off
-        // `target` even though it has no body of its own while in Multiple mode.
-        batch.GenerateBatch(target.complexity, target.addEyes, target.animationMode, target.nodePrefab, target.eyePrefab);
-        statusLabel.text = $"Generated {batch.Creatures.Count} creatures";
-
-        Bounds bounds = batch.ComputeBounds();
-        FrameCamera(bounds.center, bounds.extents.magnitude, null);
-    }
-
+    // No button any more, but the logic (CreatureGenerator.MutatePart) is kept
+    // for future use -- wire this back to a Button to re-expose it.
     private void MutateCreature()
     {
         if (target == null || target.body == null)
@@ -804,13 +1066,6 @@ public class CreatureGeneratorUI : MonoBehaviour
     // NodeEditController's shared undo/redo stack, so Ctrl+Z restores it.
     private void ClearCreature()
     {
-        if (mode == GenerationMode.Multiple)
-        {
-            batchGenerator?.ClearBatch();
-            statusLabel.text = "Cleared";
-            return;
-        }
-
         if (target == null || target.body == null)
         {
             if (target != null)
@@ -864,47 +1119,121 @@ public class CreatureGeneratorUI : MonoBehaviour
         statusLabel.text = "Cleared (Ctrl+Z to undo)";
     }
 
-    private void ExportCreatureObj()
+    // glTF (.glb) carries the skinned mesh + skeleton + bind poses + the looping
+    // idle animation (see GltfExporter / CreatureMotion) -- the format to hand a
+    // rigged creature to Blender / three.js / etc. Falls back to a static-mesh
+    // .glb when the creature has no skeleton (Animation = None).
+    private void ExportCreatureGltf()
     {
         if (target == null || target.body == null)
         {
-            statusLabel.text = "Generate a creature first.";
+            ShowToast("Generate a creature first.", ToastKind.Warning);
             return;
         }
 
-        string path = PickSavePath($"Creature_{target.seed}", "obj");
-        if (path == null)
+        try
         {
-            return; // cancelled, or no dialog available outside the Editor (see PickSavePath)
-        }
+            BMesh bmesh = target.GetComponent<BMesh>();
+            Color color = MaterialColor(bmesh != null ? bmesh.normalMaterial : null);
 
-        BMesh bmesh = target.GetComponent<BMesh>();
-        MeshExportData data = bmesh.PrepareExport();
-        MeshExporter.ExportToOBJ(data, path);
-        statusLabel.text = $"Exported to {path}";
+            SkinnedMeshRenderer smr = target.skinnedMeshObject != null
+                ? target.skinnedMeshObject.GetComponent<SkinnedMeshRenderer>()
+                : null;
+
+            Material skinMat = bmesh != null ? bmesh.normalMaterial : null;
+
+            byte[] glb;
+            if (smr != null && smr.sharedMesh != null)
+            {
+                CreatureIdleSway sway = target.GetComponent<CreatureIdleSway>();
+
+                // The exported skeleton must be at its rest pose so it matches the
+                // mesh's bind poses -- the PlayableGraph re-poses the bones next frame.
+                if (sway != null)
+                {
+                    sway.ApplyRestPose();
+                }
+
+                Color[] vcol = GltfExporter.BakeTriplanarVertexColors(smr.sharedMesh, skinMat);
+                glb = GltfExporter.BuildGlb(smr.sharedMesh, smr.bones, smr.sharedMesh.bindposes,
+                                            sway != null ? sway.MotionData : null, vcol, color, target.creatureName);
+            }
+            else
+            {
+                MeshFilter mf = target.GetComponent<MeshFilter>();
+                Mesh staticMesh = mf != null ? mf.sharedMesh : null;
+                Color[] vcol = GltfExporter.BakeTriplanarVertexColors(staticMesh, skinMat);
+                glb = GltfExporter.BuildGlb(staticMesh, null, null, null, vcol, color, target.creatureName);
+            }
+
+            string fileName = $"Creature_{target.seed}.glb";
+#if UNITY_WEBGL && !UNITY_EDITOR
+            WebFileBridge.DownloadBytes(fileName, glb, "model/gltf-binary");
+            ShowToast($"Downloading {fileName}", ToastKind.Success);
+#else
+            string path = PickSavePath($"Creature_{target.seed}", "glb");
+            if (path == null)
+            {
+                return; // user cancelled the editor dialog
+            }
+            File.WriteAllBytes(path, glb);
+            ShowToast($"Exported to {path}", ToastKind.Success);
+#endif
+        }
+        catch (System.Exception e)
+        {
+            ShowToast($"glTF export failed: {e.Message}", ToastKind.Error);
+        }
     }
 
-    // Unlike the OBJ export (a one-way geometry dump for other 3D software),
-    // this uses CreatureIO's Node-hierarchy format -- the one format that can
-    // actually be reloaded back into an editable creature (see
-    // ImportCreature()), which is what a "save/load a creature" pair needs.
+    private static Color MaterialColor(Material m)
+    {
+        if (m != null)
+        {
+            foreach (string prop in new[] { "_BaseColor", "_Color", "_MainColor" })
+            {
+                if (m.HasProperty(prop))
+                {
+                    return m.GetColor(prop);
+                }
+            }
+        }
+        return new Color(0.8f, 0.8f, 0.8f);
+    }
+
+    // Unlike the mesh export, this uses CreatureIO's Node-hierarchy format -- the
+    // one format that can
+    // actually be reloaded back into an editable creature (see ImportCreature).
     // Eyes/skeleton aren't captured, only body shape (position/size/hierarchy).
     private void ExportCreatureJson()
     {
         if (target == null || target.body == null)
         {
-            statusLabel.text = "Generate a creature first.";
+            ShowToast("Generate a creature first.", ToastKind.Warning);
             return;
         }
 
-        string path = PickSavePath($"Creature_{target.seed}", "json");
-        if (path == null)
+        try
         {
-            return;
+            string json = CreatureIO.ExportToString(target.gameObject, target.creatureName);
+            string fileName = $"Creature_{target.seed}.json";
+#if UNITY_WEBGL && !UNITY_EDITOR
+            WebFileBridge.Download(fileName, json, "application/json");
+            ShowToast($"Downloading {fileName}", ToastKind.Success);
+#else
+            string path = PickSavePath($"Creature_{target.seed}", "json");
+            if (path == null)
+            {
+                return;
+            }
+            File.WriteAllText(path, json);
+            ShowToast($"Exported to {path}", ToastKind.Success);
+#endif
         }
-
-        CreatureIO.ExportToFile(target.gameObject, target.creatureName, path);
-        statusLabel.text = $"Exported to {path}";
+        catch (System.Exception e)
+        {
+            ShowToast($"JSON export failed: {e.Message}", ToastKind.Error);
+        }
     }
 
     private void ImportCreature()
@@ -914,31 +1243,76 @@ public class CreatureGeneratorUI : MonoBehaviour
             target = CreateCreature();
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // The browser file picker is async -- OnCreatureFileUploaded (below)
+        // runs when the user has chosen a file.
+        WebFileBridge.RequestUpload(gameObject.name, nameof(OnCreatureFileUploaded), ".json");
+#else
         string path = PickOpenPath("json");
         if (path == null)
         {
-            statusLabel.text = "Import cancelled or no exported creature found.";
+            ShowToast("Import cancelled or no exported creature found.", ToastKind.Warning);
             return;
         }
 
-        target.ImportFromFile(path);
-        nameField.SetValueWithoutNotify(target.creatureName);
+        try
+        {
+            target.ImportFromFile(path);
+            AfterImport(Path.GetFileName(path));
+        }
+        catch (System.Exception e)
+        {
+            ShowToast($"Import failed: {e.Message}", ToastKind.Error);
+        }
+#endif
+    }
+
+    // SendMessage target for FileBridge.jslib's BMeshUploadFile -- the string is
+    // the picked file's text content, or empty if the user cancelled.
+    public void OnCreatureFileUploaded(string json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            ShowToast("Import cancelled.", ToastKind.Warning);
+            return;
+        }
+
+        if (target == null)
+        {
+            target = CreateCreature();
+        }
+
+        try
+        {
+            target.ImportFromJson(json);
+            AfterImport("uploaded file");
+        }
+        catch (System.Exception e)
+        {
+            ShowToast($"Import failed: {e.Message}", ToastKind.Error);
+        }
+    }
+
+    private void AfterImport(string label)
+    {
+        if (nameField != null)
+        {
+            nameField.SetValueWithoutNotify(target.creatureName);
+        }
         if (creatureNameDisplay != null)
         {
             creatureNameDisplay.text = target.creatureName;
         }
-        statusLabel.text = $"Imported {Path.GetFileName(path)}";
+        ShowToast($"Imported {label}", ToastKind.Success);
 
         Bounds bounds = OrbitCamera.ComputeNodeBounds(target.body != null ? target.body : target.gameObject);
         FrameCamera(bounds.center, bounds.extents.magnitude, target.transform);
     }
 
     // A native save dialog needs the UnityEditor assembly, which only exists
-    // when running inside the Editor (Play mode) -- there's no built-in,
-    // plugin-free way to show one from an actual (standalone/browser) build,
-    // and WebGL specifically can't show OS file dialogs at all. Outside the
-    // Editor this falls back to a fixed location instead of failing; returns
-    // null only when the user actively cancels the Editor dialog.
+    // when running inside the Editor (Play mode). WebGL exports go through
+    // WebFileBridge (a browser download) instead; a plain standalone build
+    // falls back to persistentDataPath.
     private static string PickSavePath(string defaultName, string extension)
     {
 #if UNITY_EDITOR
@@ -949,8 +1323,8 @@ public class CreatureGeneratorUI : MonoBehaviour
 #endif
     }
 
-    // Outside the Editor, falls back to the most recently written matching
-    // export in persistentDataPath instead of a picker -- see PickSavePath.
+    // Editor uses a real open dialog; a plain standalone build falls back to the
+    // most recently written matching export. WebGL uses WebFileBridge instead.
     private static string PickOpenPath(string extension)
     {
 #if UNITY_EDITOR
@@ -964,16 +1338,6 @@ public class CreatureGeneratorUI : MonoBehaviour
 #endif
     }
 
-    private CreatureBatchGenerator EnsureBatchGenerator()
-    {
-        if (batchGenerator == null)
-        {
-            GameObject go = new GameObject("CreatureBatch");
-            batchGenerator = go.AddComponent<CreatureBatchGenerator>();
-        }
-        return batchGenerator;
-    }
-
     private static void FrameCamera(Vector3 center, float radius, Transform followTarget)
     {
         OrbitCamera orbitCamera = GetMainCameraComponent<OrbitCamera>();
@@ -985,8 +1349,11 @@ public class CreatureGeneratorUI : MonoBehaviour
 
     private CreatureGenerator CreateCreature()
     {
+        // World origin -- the skinned-mesh bind poses are captured in world
+        // space, so an off-origin creature skins incorrectly. The camera is
+        // framed onto the creature afterwards regardless of where it sits.
         GameObject go = new GameObject("Creature");
-        go.transform.position = DefaultSpawnPosition();
+        go.transform.position = Vector3.zero;
         go.AddComponent<BMesh>();
         CreatureGenerator generator = go.AddComponent<CreatureGenerator>();
 
@@ -1004,15 +1371,6 @@ public class CreatureGeneratorUI : MonoBehaviour
     private static T GetMainCameraComponent<T>() where T : Component
     {
         return Camera.main != null ? Camera.main.GetComponent<T>() : null;
-    }
-
-    private static Vector3 DefaultSpawnPosition()
-    {
-        if (Camera.main != null)
-        {
-            return Camera.main.transform.position + Camera.main.transform.forward * 5f;
-        }
-        return Vector3.zero;
     }
 
     private static PanelSettings CreateDefaultPanelSettings()

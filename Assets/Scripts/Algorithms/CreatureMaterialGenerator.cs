@@ -6,10 +6,9 @@
 // would require solving mesh unwrapping for arbitrary organic topology --
 // fragile and likely to look stretched/seamed. Triplanar mapping sidesteps
 // that: it colors the mesh from world position + normal alone, so any mesh
-// works with zero UV data. Most of the time the texture itself is generated
-// too (a blotchy two-tone Perlin pattern with a random hue per creature), so
-// nothing about material assignment needs to be authored by hand -- but see
-// PhotoTextureChance for the alternative below.
+// works with zero UV data. The skin texture is a random pick from the pre-made
+// set in Resources/Textures/Animal (a procedural Perlin pattern is generated
+// only as a fallback when that folder is empty).
 using UnityEngine;
 
 public static class CreatureMaterialGenerator
@@ -23,12 +22,6 @@ public static class CreatureMaterialGenerator
     // automatically -- no per-texture wiring needed, same auto-resolve
     // philosophy as Resources/Node.prefab and Resources/Eye.prefab.
     private const string AnimalTexturesResourcesPath = "Textures/Animal";
-
-    // How often GenerateMaterial picks one of those pre-made textures instead
-    // of generating a procedural one. 0 = always procedural (the original
-    // behavior), 1 = always a pre-made texture (falls back to procedural
-    // anyway if the Resources folder above is empty).
-    public static float PhotoTextureChance = 0.5f;
 
     private static Texture2D[] animalTextures;
 
@@ -85,7 +78,9 @@ public static class CreatureMaterialGenerator
 
     private static Material GenerateWireframeMaterial()
     {
-        Shader shader = Shader.Find("SuperSystems/Wireframe");
+        // Barycentric wireframe (see BMeshBoneExtensions.BuildWireframeMesh) --
+        // WebGL safe, unlike the old geometry-shader one.
+        Shader shader = Shader.Find("Custom/WireframeBary");
         if (shader == null)
         {
             return null;
@@ -93,18 +88,18 @@ public static class CreatureMaterialGenerator
 
         Material material = new Material(shader);
         material.name = GeneratedWireframeMaterialName;
-        material.SetColor("_WireColor", Color.cyan);
-        material.SetColor("_BaseColor", new Color(0.05f, 0.05f, 0.05f));
+        material.SetColor("_WireColor", new Color(0.35f, 0.85f, 1f, 1f));
+        material.SetFloat("_Thickness", 1.4f);
         return material;
     }
 
-    // Mixes the original procedural generator in with a chance of picking one
-    // of the pre-made animal skin textures instead -- see PhotoTextureChance
-    // and AnimalTexturesResourcesPath above.
+    // Always a pre-made skin from Resources/Textures/Animal (see
+    // AnimalTexturesResourcesPath). The procedural generator is kept only as a
+    // last-resort fallback for when that folder is empty.
     private static Texture2D PickSkinTexture()
     {
         Texture2D[] textures = GetAnimalTextures();
-        if (textures.Length > 0 && Random.value < PhotoTextureChance)
+        if (textures.Length > 0)
         {
             return textures[Random.Range(0, textures.Length)];
         }

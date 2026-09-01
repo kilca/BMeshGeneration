@@ -70,10 +70,13 @@ public static class BoneGenerator
     {
         Transform[] boneTransforms = new Transform[bones.Count];
         
-        // Create all bone GameObjects
+        // Create all bone GameObjects. The index suffix keeps every name unique:
+        // mirrored limbs (BilateralPair) reuse the same PartSpec, so without it
+        // two sibling bones share a name and an AnimationClip transform path
+        // resolves to only one of them -- which left just a single limb animating.
         for (int i = 0; i < bones.Count; i++)
         {
-            GameObject boneObj = new GameObject(bones[i].name + "_Bone");
+            GameObject boneObj = new GameObject($"{bones[i].name}_{i}_Bone");
             boneObj.transform.position = bones[i].position;
             boneObj.transform.rotation = bones[i].rotation;
             boneTransforms[i] = boneObj.transform;

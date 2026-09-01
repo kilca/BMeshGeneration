@@ -3,7 +3,6 @@
 // ============================================================================
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Animations.Rigging;
 
 public static class BMeshBoneExtensions
 {
@@ -37,8 +36,8 @@ public static class BMeshBoneExtensions
     // Builds an actual posable skeleton: a bone hierarchy (CreateSkeletonHierarchy)
     // bound to a SkinnedMeshRenderer on a new child GameObject, with automatic
     // proximity-based bone weights (same weighting used by the COLLADA/JSON/binary
-    // export). The original MeshRenderer is hidden (showMode -> Gizmo) so the static
-    // mesh and the skinned copy don't render on top of each other.
+    // export). The static MeshRenderer is kept hidden while bmesh.skinnedRenderer
+    // is set (see BMesh.Update) so the two copies don't render on top of each other.
     public static SkinnedMeshRenderer CreateSkeleton(this BMesh bmesh)
     {
         Mesh sourceMesh = bmesh.GetComponent<MeshFilter>().sharedMesh;
@@ -67,8 +66,29 @@ public static class BMeshBoneExtensions
         renderer.bones = boneTransforms;
         renderer.rootBone = boneTransforms.Length > 0 ? boneTransforms[0] : null;
         renderer.material = bmesh.normalMaterial;
+        // The idle sway swings bones well past the mesh's baked bounds -- without
+        // this the whole creature pops in and out as the bounds leave the frustum.
+        renderer.updateWhenOffscreen = true;
 
-        bmesh.showMode = BMesh.ShowMode.Gizmo;
+        bmesh.skinnedRenderer = renderer;
+
+        // Wireframe copy: same skin, unwelded triangles carrying barycentric
+        // vertex colours, drawn by Custom/WireframeBary. Hidden until the
+        // Wireframe show mode selects it (see BMesh.Update).
+        if (bmesh.wireframeMaterial != null)
+        {
+            Mesh wireMesh = BuildWireframeMesh(skinnedMesh);
+            GameObject wireObject = new GameObject("Wireframe");
+            wireObject.transform.SetParent(skinnedObject.transform, false);
+            SkinnedMeshRenderer wireRenderer = wireObject.AddComponent<SkinnedMeshRenderer>();
+            wireRenderer.sharedMesh = wireMesh;
+            wireRenderer.bones = boneTransforms;
+            wireRenderer.rootBone = renderer.rootBone;
+            wireRenderer.material = bmesh.wireframeMaterial;
+            wireRenderer.updateWhenOffscreen = true;
+            wireRenderer.enabled = false;
+            bmesh.wireframeRenderer = wireRenderer;
+        }
 
         // Decorations (eyes, ...) are parented to Nodes, which stay static once
         // bones take over the visible mesh -- make each one follow its matching
@@ -100,48 +120,46 @@ public static class BMeshBoneExtensions
         return renderer;
     }
 
-    // Wires a generic "everything wobbles a bit" secondary-motion rig on top of
-    // an existing skeleton (see CreateSkeleton): every bone except the root gets
-    // a DampedTransform sourced from its own parent bone, so it lags/springs
-    // behind whenever that parent moves. Works for any topology (legs, tentacles,
-    // spine segments) with no per-limb semantic setup, unlike e.g. TwoBoneIK which
-    // needs a specific 3-joint chain. Something still has to actually move the
-    // root bone for this to be visible -- see CreatureIdleSway.
-    public static GameObject AddSecondaryMotionRig(this BMesh bmesh, Transform skeletonGroup, float dampPosition = 0.5f, float dampRotation = 0.5f)
+    // Unwelds every triangle (3 fresh verts) and writes barycentric coords into
+    // the vertex colours, keeping the source skin weights / bind poses so it can
+    // ride the same bones as the main skinned mesh (see Custom/WireframeBary).
+    private static Mesh BuildWireframeMesh(Mesh src)
     {
-        GameObject rigObject = new GameObject("Rig");
-        rigObject.transform.SetParent(bmesh.transform, false);
-        Rig rig = rigObject.AddComponent<Rig>();
+        Vector3[] sv = src.vertices;
+        Vector3[] sn = src.normals;
+        BoneWeight[] sbw = src.boneWeights;
+        int[] tris = src.triangles;
+        int count = tris.Length;
 
-        foreach (Transform bone in skeletonGroup.GetComponentsInChildren<Transform>())
+        Vector3[] v = new Vector3[count];
+        Vector3[] n = sn.Length == sv.Length ? new Vector3[count] : System.Array.Empty<Vector3>();
+        BoneWeight[] w = sbw.Length == sv.Length ? new BoneWeight[count] : System.Array.Empty<BoneWeight>();
+        Color[] colors = new Color[count];
+        int[] idx = new int[count];
+
+        Color[] bary = { new Color(1f, 0f, 0f), new Color(0f, 1f, 0f), new Color(0f, 0f, 1f) };
+
+        for (int i = 0; i < count; i++)
         {
-            if (bone == skeletonGroup || bone.parent == skeletonGroup)
-            {
-                continue; // the grouping object itself, or the root bone (no bone parent to lag behind)
-            }
-
-            GameObject constraintObject = new GameObject(bone.name + "_Damped");
-            constraintObject.transform.SetParent(rigObject.transform, false);
-
-            DampedTransform damped = constraintObject.AddComponent<DampedTransform>();
-            damped.data.constrainedObject = bone;
-            damped.data.sourceObject = bone.parent;
-            damped.data.dampPosition = dampPosition;
-            damped.data.dampRotation = dampRotation;
+            int s = tris[i];
+            v[i] = sv[s];
+            if (n.Length > 0) n[i] = sn[s];
+            if (w.Length > 0) w[i] = sbw[s];
+            colors[i] = bary[i % 3];
+            idx[i] = i;
         }
 
-        RigBuilder rigBuilder = bmesh.GetComponent<RigBuilder>();
-        if (rigBuilder == null)
+        Mesh m = new Mesh
         {
-            rigBuilder = bmesh.gameObject.AddComponent<RigBuilder>(); // auto-adds the required Animator too
-        }
-        else
-        {
-            rigBuilder.layers.Clear(); // reused from a previous AddIdleAnimation call -- drop stale layers
-        }
-        rigBuilder.layers.Add(new RigLayer(rig));
-        rigBuilder.Build();
-
-        return rigObject;
+            indexFormat = count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16,
+            vertices = v,
+            colors = colors,
+        };
+        if (n.Length > 0) m.normals = n;
+        if (w.Length > 0) m.boneWeights = w;
+        m.bindposes = src.bindposes;
+        m.triangles = idx;
+        m.RecalculateBounds();
+        return m;
     }
 }

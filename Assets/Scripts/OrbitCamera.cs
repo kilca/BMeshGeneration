@@ -15,8 +15,8 @@ public class OrbitCamera : MonoBehaviour
     public float zoomSpeed = 4f;
     public float startPitch = 20f;
 
-    [Tooltip("Flat solid-color background instead of Unity's default procedural skybox -- simple, and won't clash with the creatures' randomized skin colors.")]
-    public Color backgroundColor = new Color(0.75f, 0.78f, 0.82f);
+    [Tooltip("Flat solid-color background instead of Unity's default procedural skybox -- a dark neutral charcoal.")]
+    public Color backgroundColor = new Color(0.09f, 0.09f, 0.105f);
 
     [Tooltip("How much farther than a subject's bounding radius Frame() pulls the camera back -- higher leaves more breathing room around the edges.")]
     public float framingPadding = 2.2f;
@@ -46,7 +46,11 @@ public class OrbitCamera : MonoBehaviour
             pitch = Mathf.Clamp(pitch, -80f, 80f);
         }
 
-        distance -= Input.mouseScrollDelta.y * zoomSpeed;
+        // Don't zoom when the wheel is being used to scroll a UI panel.
+        if (!CreatureGeneratorUI.PointerOverPanel)
+        {
+            distance -= Input.mouseScrollDelta.y * zoomSpeed;
+        }
         distance = Mathf.Clamp(distance, minDistance, maxDistance);
 
         Vector3 pivot = target != null ? target.position : framedPivot;
@@ -56,9 +60,8 @@ public class OrbitCamera : MonoBehaviour
 
     // Points the pivot at `center` and sets distance so a subject of the
     // given bounding radius comfortably fits in view -- called after
-    // Generate() so a creature (or a whole batch, see CreatureBatchGenerator)
-    // is framed automatically instead of possibly ending up outside the
-    // default view distance. `followTarget`, if given, keeps the pivot
+    // Generate() so a creature is framed automatically instead of possibly
+    // ending up outside the default view distance. `followTarget`, if given, keeps the pivot
     // tracking that transform afterwards (e.g. so it stays centered through
     // later node edits); leave null for a fixed point (there's no single
     // transform to follow for a whole batch).
